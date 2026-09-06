@@ -119,7 +119,10 @@ func Dial(ctx context.Context, rawURL string) (net.Conn, error)
 - Per-IP rate limiting on the server side: `x/time/rate.Limiter` per client IP
   (from `http.Request.RemoteAddr`, IP portion only), stored in a map guarded by
   `sync.RWMutex`. Exceeding the limit → HTTP 429 before any WebSocket upgrade.
-  Default 1 req/s, burst 5; `-rate 0` disables.
+  Default 1 req/s, burst 5; `-rate 0` disables. Entries are evicted after 60s
+  of inactivity — each entry carries a `lastSeen` timestamp updated on access,
+  and a background sweep goroutine (1m ticker) drops entries idle longer than
+  60s, keeping the map bounded.
 
 ## SSH Server (`internal/server`)
 
@@ -150,7 +153,7 @@ stale-key bugs).
 |-----------------|-------------------------------------------------------------|
 | `pty-req`       | Parse into `pty.Winsize`; remember `TERM` env var            |
 | `window-change` | `pty.Setsize` on the live PTY (before spawn: update the stored size used at spawn) |
-| `shell`         | Spawn user's shell with PTY                                 |
+| `shell`         | Spawn user's shell; PTY if `pty-req` preceded, else plain pipes (never panics on missing PTY) |
 | `exec`          | Run command; PTY if `pty-req` preceded, else plain pipes    |
 | anything else   | Reply false                                                  |
 
@@ -179,23 +182,37 @@ with zero-value credential.
 
 ### Keepalive
 
-Clients send `keepalive@openssh.com` global requests; `x/crypto/ssh`
-auto-replies to unknown global requests, and any reply proves liveness. No
-server-side keepalive code required; the client enforces the timeout.
+Clients send `keepalive@openssh.com` global requests; the server drains the
+connection's global requests channel (`conn.GlobalRequests()`), replying to
+each — any reply satisfies the client's liveness check. No dedicated
+server-side keepalive timer; the client enforces the timeout.
 
-### Cleanup
+### Cleanup & exit status
 
 When the channel closes or the WebSocket drops: `SIGKILL` the child, close the
 PTY fd, and `cmd.Wait()` in a goroutine (reaps the zombie). Both `io.Copy`
 directions (channel ↔ PTY) run in goroutines; whichever finishes first kills
 the child. Connection teardown also closes `ssh.ServerConn`.
 
+When the child process exits normally, the server sends an `exit-status`
+channel request (and `exit-signal` when the child is killed by a signal) on
+the session channel before closing it, so the client's `session.Wait()`
+surfaces the real exit code via `*ssh.ExitError`.
+
+### Graceful shutdown
+
+`SIGTERM`/`SIGINT` handler: `http.Server.Shutdown` stops accepting new
+connections and WebSocket upgrades; a `sync.WaitGroup` over active SSH
+connections drains in-flight sessions before exit. No forced kill timeout —
+the operator (or init system's final SIGKILL) decides. Shutdown is logged.
+
 ## SSH Client (`internal/client`)
 
 ### Connect
 
-Parse target → `transport.Dial` (TLS for `wss://`) → `ssh.NewClientConn` with
-`ssh.ClientConfig{User, Auth: []ssh.AuthMethod{PublicKey(signers...)},
+Parse target → `transport.Dial` with `context.WithTimeout(ctx, 10s)` (WebSocket
+dial itself carries a timeout, independent of the SSH handshake timeout) →
+`ssh.NewClientConn` with `ssh.ClientConfig{User, Auth: []ssh.AuthMethod{PublicKey(signers...)},
 HostKeyCallback, Timeout: 10s}` → `ssh.NewClient` → `OpenSession("session")`.
 
 ### Host key verification
