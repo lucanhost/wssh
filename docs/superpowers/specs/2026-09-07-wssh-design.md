@@ -111,8 +111,10 @@ func Dial(ctx context.Context, rawURL string) (net.Conn, error)
 - `websocket.Accept` / `websocket.Dial` with:
   - `CompressionMode: websocket.CompressionDisabled` — SSH carries its own
     encryption; compression adds overhead and side-channel surface.
-  - `KeepAlivePingOptions` — library-managed ping/pong (15s interval), no
-    hand-rolled keepalive goroutines.
+  - Manual ping/pong keepalive (this `coder/websocket` version has no
+    `KeepAlivePingOptions`): a per-connection goroutine pings every 15s with a
+    5s timeout; it exits when the connection closes. `Conn.Ping` is safe to
+    call concurrently with the SSH reader.
 - `websocket.NetConn()` uses binary data messages by design; transport tests
   assert binary opcodes explicitly to guard regressions.
 - Closing the returned `net.Conn` closes the underlying WebSocket cleanly.
