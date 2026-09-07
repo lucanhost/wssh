@@ -445,13 +445,11 @@ func TestServeConnClearsDeadlineAfterHandshake(t *testing.T) {
 	}
 	defer ln.Close()
 	var rc *recordingConn
-	var sc net.Conn
-	doneAccept := make(chan struct{})
+	var ok bool
 	go func() {
-		defer close(doneAccept)
-		var err error
-		sc, err = ln.Accept()
+		sc, err := ln.Accept()
 		if err != nil {
+			t.Errorf("Accept failed: %v", err)
 			return
 		}
 		rc = &recordingConn{Conn: sc}
@@ -478,16 +476,15 @@ func TestServeConnClearsDeadlineAfterHandshake(t *testing.T) {
 	go ssh.DiscardRequests(reqs)
 	_ = chans // test opens no channels; closing the client ends serveConn
 
-	cleared := func() bool {
-		rc.mu.Lock()
-		defer rc.mu.Unlock()
-		return len(rc.deadline) > 0 && rc.deadline[len(rc.deadline)-1].IsZero()
-	}
-	ok := false
 	for i := 0; i < 100; i++ {
-		if cleared() {
-			ok = true
-			break
+		if rc != nil {
+			rc.mu.Lock()
+			last := rc.deadline[len(rc.deadline)-1]
+			rc.mu.Unlock()
+			if last.IsZero() {
+				ok = true
+				break
+			}
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
