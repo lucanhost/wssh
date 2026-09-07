@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -164,7 +165,11 @@ func (s *Server) startProcess(u *user.User, shell string, term string, havePTY b
 		cmd.Env = append(cmd.Env, "TERM="+term)
 	}
 	attrs := &syscall.SysProcAttr{}
-	if cred := credentialsFor(u); cred != nil {
+	cred, err := credentialsFor(u)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if cred != nil {
 		attrs.Credential = cred
 	}
 	if havePTY {
@@ -196,17 +201,19 @@ func (s *Server) startProcess(u *user.User, shell string, term string, havePTY b
 	return cmd, nil, pw, nil
 }
 
-func credentialsFor(u *user.User) *syscall.Credential {
+var ErrMalformedCredential = errors.New("malformed uid or gid in user record")
+
+func credentialsFor(u *user.User) (*syscall.Credential, error) {
 	if os.Geteuid() != 0 {
-		return nil
+		return nil, nil
 	}
 	uid, err := strconv.ParseUint(u.Uid, 10, 32)
 	if err != nil {
-		return nil
+		return nil, ErrMalformedCredential
 	}
 	gid, err := strconv.ParseUint(u.Gid, 10, 32)
 	if err != nil {
-		return nil
+		return nil, ErrMalformedCredential
 	}
 	groups := []uint32{}
 	if gidStrings, err := u.GroupIds(); err == nil {
@@ -218,7 +225,7 @@ func credentialsFor(u *user.User) *syscall.Credential {
 			groups = append(groups, uint32(g))
 		}
 	}
-	return &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: groups}
+	return &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: groups}, nil
 }
 
 func (s *Server) reap(channel ssh.Channel, cmd *exec.Cmd, ptyFile *os.File, stdinPipe *os.File, mu *sync.Mutex, u *user.User) {
