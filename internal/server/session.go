@@ -168,6 +168,8 @@ func (s *Server) startProcess(u *user.User, shell string, term string, havePTY b
 		attrs.Credential = cred
 	}
 	if havePTY {
+		attrs.Setsid = true
+		attrs.Setctty = true
 		if winSize.Rows == 0 && winSize.Cols == 0 {
 			winSize = pty.Winsize{Rows: 24, Cols: 80}
 		}
