@@ -51,7 +51,6 @@ func HostKeyCallback(opts HostKeyOptions) ssh.HostKeyCallback {
 			}
 			var keyErr *knownhosts.KeyError
 			if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
-				// unknown host — fall through to TOFU / prompt
 			} else {
 				if errors.As(err, &keyErr) {
 					return fmt.Errorf("wssh: host key for %s does not match the known_hosts entry (possible MITM); connection refused", hostname)
