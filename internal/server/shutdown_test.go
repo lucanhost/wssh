@@ -47,17 +47,6 @@ func TestWaitDrainsActiveSessions(t *testing.T) {
 
 func TestWaitTimeoutReturnsFalseOnHungSession(t *testing.T) {
 	signer, line := testSigner(t)
-	_, wsURL := newTestServer(t, line, 0)
-	cl := dialTestSSH(t, wsURL, currentUser(t), signer)
-	sess, err := cl.NewSession()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.Start("sleep 60"); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	time.Sleep(300 * time.Millisecond)
-
 	shortSrv, shortWSURL := newTestServerWithTimeout(t, line, 0, 500*time.Millisecond)
 	shortCl := dialTestSSH(t, shortWSURL, currentUser(t), signer)
 	shortSess, err := shortCl.NewSession()
