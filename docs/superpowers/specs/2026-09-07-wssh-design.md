@@ -309,3 +309,30 @@ code propagated.
 - `env` request forwarding.
 - Client config file (`~/.ssh/config` parsing).
 - IPv6-specific handling beyond what `net` provides free.
+
+## Post-design amendments
+
+The following items were identified during implementation and are recorded here
+for traceability. No behavior change is implied beyond what the implementation
+tasks above already effect.
+
+1. **Keepalive is manual WS ping loops, not `keepalive@openssh.com` global requests.**
+   `github.com/coder/websocket` v1.8.15 does not support `KeepAlivePingOptions`.
+   The server-side keepalive is a per-connection goroutine that calls
+   `Conn.Ping` every 15s with a 5s timeout. Clients send `keepalive@openssh.com`
+   SSH global requests; the server discards them (via `ssh.DiscardRequests`) but
+   the WebSocket ping/pong chain provides the actual liveness signal.
+
+2. **Rate limiting keys on RemoteAddr — ineffective behind proxies.**
+   The per-IP rate limiter uses `http.Request.RemoteAddr`. When wsshd runs behind
+   a TLS-terminating reverse proxy, all clients appear to originate from the
+   proxy's IP, making per-IP rate limiting pointless. Operators must enforce rate
+   limits at the proxy layer in that deployment model. A startup warning is logged.
+
+3. **Spec's `user.Shell` is wrong — shell comes from `lookupShell` parsing `/etc/passwd`.**
+   The design spec references `user.Shell` (field on `os/user.User`) but Go's
+   `os/user.User` struct has no `Shell` field. The actual implementation parses
+   `/etc/passwd` directly via `lookupShell(username string) string` (see
+   `internal/server/auth.go`), returning the 7th colon-delimited field. Non-Linux
+   systems without `/etc/passwd` fall back to an empty string, which the server
+   treats as `/bin/sh`.
