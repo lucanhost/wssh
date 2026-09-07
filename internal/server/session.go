@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/user"
 	"strconv"
+	"sync"
 	"syscall"
 
 	"github.com/creack/pty"
@@ -44,17 +45,17 @@ type exitSignalRequest struct {
 }
 
 var signalNames = map[syscall.Signal]string{
-	syscall.SIGHUP:  "SIGHUP",
-	syscall.SIGINT:  "SIGINT",
-	syscall.SIGQUIT: "SIGQUIT",
-	syscall.SIGILL:  "SIGILL",
-	syscall.SIGABRT: "SIGABRT",
-	syscall.SIGFPE:  "SIGFPE",
-	syscall.SIGKILL: "SIGKILL",
-	syscall.SIGSEGV: "SIGSEGV",
-	syscall.SIGPIPE: "SIGPIPE",
-	syscall.SIGALRM: "SIGALRM",
-	syscall.SIGTERM: "SIGTERM",
+	syscall.SIGHUP:  "HUP",
+	syscall.SIGINT:  "INT",
+	syscall.SIGQUIT: "QUIT",
+	syscall.SIGILL:  "ILL",
+	syscall.SIGABRT: "ABRT",
+	syscall.SIGFPE:  "FPE",
+	syscall.SIGKILL: "KILL",
+	syscall.SIGSEGV: "SEGV",
+	syscall.SIGPIPE: "PIPE",
+	syscall.SIGALRM: "ALRM",
+	syscall.SIGTERM: "TERM",
 }
 
 func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request, u *user.User, shell string) {
@@ -199,21 +200,27 @@ func credentialsFor(u *user.User) *syscall.Credential {
 }
 
 func (s *Server) reap(channel ssh.Channel, cmd *exec.Cmd, ptyFile *os.File, u *user.User) {
+	var copyWG sync.WaitGroup
 	if ptyFile != nil {
-		go io.Copy(channel, ptyFile)
+		copyWG.Add(1)
+		go func() {
+			defer copyWG.Done()
+			io.Copy(channel, ptyFile)
+		}()
 		go io.Copy(ptyFile, channel)
 	}
 	err := cmd.Wait()
 	if ptyFile != nil {
 		_ = ptyFile.Close()
 	}
+	copyWG.Wait()
 	status := uint32(0)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if waitStatus, ok := exitErr.Sys().(syscall.WaitStatus); ok && waitStatus.Signaled() {
 				name, ok := signalNames[waitStatus.Signal()]
 				if !ok {
-					name = fmt.Sprintf("SIG%d", int(waitStatus.Signal()))
+					name = fmt.Sprintf("%d", int(waitStatus.Signal()))
 				}
 				channel.SendRequest("exit-signal", false, ssh.Marshal(exitSignalRequest{
 					SignalName:  name,
