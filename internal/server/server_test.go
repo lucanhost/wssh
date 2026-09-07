@@ -444,15 +444,16 @@ func TestServeConnClearsDeadlineAfterHandshake(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	defer ln.Close()
-	var rc *recordingConn
-	var ok bool
+	rcCh := make(chan *recordingConn, 1)
+	errCh := make(chan error, 1)
 	go func() {
 		sc, err := ln.Accept()
 		if err != nil {
-			t.Errorf("Accept failed: %v", err)
+			errCh <- err
 			return
 		}
-		rc = &recordingConn{Conn: sc}
+		rc := &recordingConn{Conn: sc}
+		rcCh <- rc // channel send happens-before the main goroutine's receive
 		s.wg.Add(1)
 		s.serveConn(rc, ln.Addr().String())
 	}()
@@ -476,15 +477,24 @@ func TestServeConnClearsDeadlineAfterHandshake(t *testing.T) {
 	go ssh.DiscardRequests(reqs)
 	_ = chans // test opens no channels; closing the client ends serveConn
 
+	var ok bool
 	for i := 0; i < 100; i++ {
-		if rc != nil {
+		select {
+		case rc := <-rcCh:
 			rc.mu.Lock()
-			last := rc.deadline[len(rc.deadline)-1]
-			rc.mu.Unlock()
-			if last.IsZero() {
-				ok = true
-				break
+			if len(rc.deadline) > 0 {
+				last := rc.deadline[len(rc.deadline)-1]
+				if last.IsZero() {
+					ok = true
+				}
 			}
+			rc.mu.Unlock()
+		case err := <-errCh:
+			t.Fatalf("Accept failed: %v", err)
+		default:
+		}
+		if ok {
+			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
