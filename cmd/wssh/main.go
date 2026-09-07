@@ -45,6 +45,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "wssh: %v\n", err)
 		os.Exit(2)
 	}
+	if note := client.PlaintextNote(target); note != "" {
+		fmt.Fprintln(os.Stderr, note)
+	}
 	command := strings.Join(args[1:], " ")
 
 	signers, err := client.LoadSigners(keys, os.Stderr)
