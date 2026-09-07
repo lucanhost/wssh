@@ -89,7 +89,12 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle(wsPath, srv.WebSocketHandler())
-	hs := &http.Server{Addr: resolved.Addr, Handler: mux}
+	hs := &http.Server{
+		Addr:              resolved.Addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
 	ln, err := net.Listen("tcp", resolved.Addr)
 	if err != nil {
