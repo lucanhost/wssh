@@ -100,6 +100,11 @@ func currentUserFromOS() string {
 	return u.Username
 }
 
+// handshakeTimeout bounds the time allowed for the SSH handshake (version
+// exchange, key exchange, and authentication), mirroring OpenSSH's
+// LoginGraceTime. It is a variable so tests can shorten it.
+var handshakeTimeout = 60 * time.Second
+
 func (s *Server) Root() bool { return s.root }
 
 func (s *Server) WebSocketHandler() http.Handler {
@@ -122,11 +127,15 @@ func (s *Server) WebSocketHandler() http.Handler {
 func (s *Server) serveConn(netConn net.Conn, remoteAddr string) {
 	defer s.wg.Done()
 	defer netConn.Close()
+	if err := netConn.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
+		s.logger.Warn("ssh handshake deadline not set", "remote", remoteAddr, "err", err)
+	}
 	sconn, chans, reqs, err := ssh.NewServerConn(netConn, &s.sshConfig)
 	if err != nil {
 		s.logger.Warn("ssh handshake failed", "remote", remoteAddr, "err", err)
 		return
 	}
+	_ = netConn.SetDeadline(time.Time{}) // handshake done; allow long-lived sessions
 	defer sconn.Close()
 	go ssh.DiscardRequests(reqs)
 	s.logger.Info("connection authenticated", "user", sconn.User(), "remote", remoteAddr)

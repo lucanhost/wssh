@@ -5,12 +5,14 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -337,4 +339,160 @@ func TestMaxChildrenSemNotLeakedOnMalformedExec(t *testing.T) {
 	cl1.Close()
 	cl2.Close()
 	cl4.Close()
+}
+
+type dummyAddr struct{}
+
+func (dummyAddr) Network() string { return "test" }
+func (dummyAddr) String() string  { return "test" }
+
+// stallConn accepts writes, then blocks reads until the deadline set by
+// serveConn expires — simulating a Slowloris client that never completes
+// the SSH handshake.
+type stallConn struct {
+	mu        sync.Mutex
+	deadline  time.Time
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func (c *stallConn) Read(b []byte) (int, error) {
+	c.mu.Lock()
+	d := c.deadline
+	c.mu.Unlock()
+	var timer <-chan time.Time
+	if !d.IsZero() {
+		timer = time.After(time.Until(d))
+	}
+	select {
+	case <-timer:
+		return 0, os.ErrDeadlineExceeded
+	case <-c.closed:
+		return 0, net.ErrClosed
+	}
+}
+
+func (c *stallConn) Write(b []byte) (int, error) {
+	select {
+	case <-c.closed:
+		return 0, net.ErrClosed
+	default:
+		return len(b), nil
+	}
+}
+
+func (c *stallConn) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return nil
+}
+
+func (c *stallConn) LocalAddr() net.Addr                { return dummyAddr{} }
+func (c *stallConn) RemoteAddr() net.Addr               { return dummyAddr{} }
+func (c *stallConn) SetDeadline(t time.Time) error      { c.mu.Lock(); c.deadline = t; c.mu.Unlock(); return nil }
+func (c *stallConn) SetReadDeadline(t time.Time) error  { return c.SetDeadline(t) }
+func (c *stallConn) SetWriteDeadline(t time.Time) error { return c.SetDeadline(t) }
+
+// recordingConn records SetDeadline calls while delegating to a real conn.
+type recordingConn struct {
+	net.Conn
+	mu       sync.Mutex
+	deadline []time.Time
+}
+
+func (c *recordingConn) SetDeadline(t time.Time) error {
+	c.mu.Lock()
+	c.deadline = append(c.deadline, t)
+	c.mu.Unlock()
+	return c.Conn.SetDeadline(t)
+}
+
+func TestServeConnHandshakeDeadline(t *testing.T) {
+	s := newAuthServer(t, "")
+	old := handshakeTimeout
+	handshakeTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { handshakeTimeout = old })
+
+	sc := &stallConn{closed: make(chan struct{})}
+	s.wg.Add(1)
+	done := make(chan struct{})
+	go func() {
+		s.serveConn(sc, "test:1")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("serveConn did not return after handshake deadline")
+	}
+	sc.mu.Lock()
+	d := sc.deadline
+	sc.mu.Unlock()
+	if d.IsZero() {
+		t.Fatal("handshake deadline was not set before ssh.NewServerConn")
+	}
+}
+
+func TestServeConnClearsDeadlineAfterHandshake(t *testing.T) {
+	signer, line := testSigner(t)
+	s := newAuthServer(t, line)
+	u, err := user.Current()
+	if err != nil {
+		t.Skipf("user.Current: %v", err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	var rc *recordingConn
+	var sc net.Conn
+	doneAccept := make(chan struct{})
+	go func() {
+		defer close(doneAccept)
+		var err error
+		sc, err = ln.Accept()
+		if err != nil {
+			return
+		}
+		rc = &recordingConn{Conn: sc}
+		s.wg.Add(1)
+		s.serveConn(rc, ln.Addr().String())
+	}()
+
+	addr := ln.Addr().String()
+	cfg := &ssh.ClientConfig{
+		User:            u.Username,
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+	netConn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	_ = netConn.SetDeadline(time.Now().Add(10 * time.Second))
+	conn, chans, reqs, err := ssh.NewClientConn(netConn, addr, cfg)
+	if err != nil {
+		t.Fatalf("client handshake: %v", err)
+	}
+	defer conn.Close()
+	go ssh.DiscardRequests(reqs)
+	_ = chans // test opens no channels; closing the client ends serveConn
+
+	cleared := func() bool {
+		rc.mu.Lock()
+		defer rc.mu.Unlock()
+		return len(rc.deadline) > 0 && rc.deadline[len(rc.deadline)-1].IsZero()
+	}
+	ok := false
+	for i := 0; i < 100; i++ {
+		if cleared() {
+			ok = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_ = netConn.SetDeadline(time.Time{})
+	if !ok {
+		t.Fatal("deadline not cleared after successful handshake")
+	}
 }
