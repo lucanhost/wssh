@@ -126,3 +126,46 @@ func TestLoadAuthorizedKeysLongLine(t *testing.T) {
 		t.Fatal("parsed key does not match generated key")
 	}
 }
+
+func FuzzLoadAuthorizedKeys(f *testing.F) {
+	_, line := fuzzKeyLine()
+	for _, seed := range []string{
+		"",
+		"# comment only\n",
+		line,
+		line + " " + strings.Repeat("x", 100*1024) + "\n",
+		"not a valid key\n",
+		"\xff\xfe\x00garbage\n",
+		strings.Repeat("A", 2*1024*1024),
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, content string) {
+		dir := t.TempDir()
+		akPath := filepath.Join(dir, "authorized_keys")
+		if err := os.WriteFile(akPath, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s := New(Config{
+			Logger:             discardLogger(),
+			AuthorizedKeysPath: func(*user.User) string { return akPath },
+		})
+		u, err := user.Current()
+		if err != nil {
+			t.Skipf("user.Current: %v", err)
+		}
+		_, _ = s.loadAuthorizedKeys(u)
+	})
+}
+
+func fuzzKeyLine() (ssh.Signer, string) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, ""
+	}
+	signer, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		return nil, ""
+	}
+	return signer, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
+}
