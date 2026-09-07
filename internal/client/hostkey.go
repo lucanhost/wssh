@@ -38,9 +38,9 @@ func HostKeyCallback(opts HostKeyOptions) ssh.HostKeyCallback {
 	if out == nil {
 		out = os.Stderr
 	}
-	reader := bufio.NewReader(in)
 
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		reader := bufio.NewReader(in)
 		if baseErr != nil {
 			return baseErr
 		}

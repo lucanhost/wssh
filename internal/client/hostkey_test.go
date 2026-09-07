@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"golang.org/x/crypto/ssh"
@@ -148,3 +150,44 @@ func (websocketMockAddr) String() string  { return "websocket/unknown-addr" }
 
 var _ = net.SplitHostPort
 var _ = knownhosts.New
+
+func TestHostKeyCallbackConcurrent(t *testing.T) {
+	dir := t.TempDir()
+	kh := filepath.Join(dir, "known_hosts")
+	os.WriteFile(kh, nil, 0o600)
+	_, key := testKey(t)
+
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	cb := HostKeyCallback(HostKeyOptions{KnownHostsPath: kh, In: pr, Out: io.Discard})
+
+	const n = 10
+	go func() {
+		defer pw.Close()
+		for i := 0; i < n; i++ {
+			if _, err := io.WriteString(pw, "yes\n"); err != nil {
+				return
+			}
+		}
+	}()
+
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- cb("srv:8080", fakeAddr{}, key)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent callback: %v", err)
+		}
+	}
+}
