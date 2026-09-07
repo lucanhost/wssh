@@ -52,7 +52,7 @@ func New(cfg Config) *Server {
 	s.sshConfig = ssh.ServerConfig{
 		PublicKeyCallback: s.publicKeyCallback,
 		ServerVersion:     "SSH-2.0-wssh",
-		MaxAuthTries:      6,
+		MaxAuthTries:      3,
 	}
 	s.sshConfig.AddHostKey(cfg.Signer)
 	return s

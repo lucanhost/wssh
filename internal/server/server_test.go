@@ -145,3 +145,11 @@ func TestRateLimitedUpgradeRejected(t *testing.T) {
 		t.Fatal("second immediate dial passed rate limit (burst=1)")
 	}
 }
+
+func TestMaxAuthTriesIsThree(t *testing.T) {
+	signer, _ := testSigner(t)
+	s := New(Config{Signer: signer})
+	if s.sshConfig.MaxAuthTries != 3 {
+		t.Fatalf("MaxAuthTries = %d, want 3", s.sshConfig.MaxAuthTries)
+	}
+}
