@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"golang.org/x/crypto/ssh"
 
 	"wssh/internal/client"
@@ -164,5 +167,96 @@ func TestE2ETargetDefaults(t *testing.T) {
 	}
 	if tg.Scheme != "ws" || tg.Port != 80 || tg.Path != "/ws" || tg.User != "user" || tg.Host != "host" {
 		t.Fatalf("defaults wrong: %+v", tg)
+	}
+}
+
+func startTLSServer(t *testing.T, rate float64, burst int) (*client.Target, ssh.Signer, *x509.CertPool) {
+	t.Helper()
+	_, hostPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostSigner, err := ssh.NewSignerFromKey(hostPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, clientPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientSigner, err := ssh.NewSignerFromKey(clientPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	akPath := filepath.Join(t.TempDir(), "authorized_keys")
+	if err := os.WriteFile(akPath, ssh.MarshalAuthorizedKey(clientSigner.PublicKey()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := server.New(server.Config{
+		Signer:             hostSigner,
+		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Rate:               rate,
+		Burst:              burst,
+		AuthorizedKeysPath: func(*user.User) string { return akPath },
+	})
+	t.Cleanup(srv.Close)
+	mux := http.NewServeMux()
+	mux.Handle("/ws", srv.WebSocketHandler())
+	up := httptest.NewTLSServer(mux)
+	t.Cleanup(up.Close)
+
+	u, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(up.Certificate())
+
+	target, err := client.ParseTarget("wss://" + u.Username + "@" + strings.TrimPrefix(up.URL, "https://") + "/ws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return target, clientSigner, roots
+}
+
+func TestE2EExecOverTLS(t *testing.T) {
+	target, signer, roots := startTLSServer(t, 0, 0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, target.WebSocketURL(), &websocket.DialOptions{
+		CompressionMode: websocket.CompressionDisabled,
+		HTTPClient: &http.Client{Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: roots},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("wss dial: %v", err)
+	}
+	defer c.Close(websocket.StatusNormalClosure, "")
+	nc := websocket.NetConn(context.Background(), c, websocket.MessageBinary)
+	defer nc.Close()
+
+	cfg := &ssh.ClientConfig{
+		User:            target.User,
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+	conn, chans, reqs, err := ssh.NewClientConn(nc, target.SSHAddr(), cfg)
+	if err != nil {
+		t.Fatalf("ssh connect over TLS: %v", err)
+	}
+	defer conn.Close()
+	cl := ssh.NewClient(conn, chans, reqs)
+	defer cl.Close()
+
+	var out bytes.Buffer
+	if err := client.RunCommand(cl, "echo e2e-tls-ok", &out, io.Discard); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out.String() != "e2e-tls-ok\n" {
+		t.Fatalf("output = %q", out.String())
 	}
 }
