@@ -151,6 +151,29 @@ func (websocketMockAddr) String() string  { return "websocket/unknown-addr" }
 var _ = net.SplitHostPort
 var _ = knownhosts.New
 
+func TestAppendKnownHostRefusesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real")
+	if err := os.WriteFile(target, []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kh := filepath.Join(dir, "known_hosts")
+	if err := os.Symlink(target, kh); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	_, key := testKey(t)
+	if err := appendKnownHost(kh, "srv:8080", key); err == nil {
+		t.Fatal("append through symlink accepted")
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "original\n" {
+		t.Fatalf("symlink target was modified: %q", data)
+	}
+}
+
 func TestHostKeyCallbackConcurrent(t *testing.T) {
 	dir := t.TempDir()
 	kh := filepath.Join(dir, "known_hosts")

@@ -82,14 +82,15 @@ func (a tcpAddr) Network() string { return "tcp" }
 func (a tcpAddr) String() string  { return string(a) }
 
 func appendKnownHost(path, hostname string, key ssh.PublicKey) error {
+	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("wssh: refusing to append to symlink %s", path)
+	}
 	entry := fmt.Sprintf("%s %s\n", hostname, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))))
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("wssh: cannot append to %s: %w", path, err)
 	}
 	defer f.Close()
-	if _, err := f.WriteString(entry); err != nil {
-		return err
-	}
-	return nil
+	_, err = f.WriteString(entry)
+	return err
 }
