@@ -164,7 +164,6 @@ func TestMaxSessionsPerConnRejectsOverflow(t *testing.T) {
 		AuthorizedKeysPath: func(*user.User) string { return akPath },
 		MaxSessionsPerConn: 2,
 	})
-	// Build minimal HTTP handler manually (skip rate limit for simplicity).
 	mux := http.NewServeMux()
 	mux.Handle("/ws", s.WebSocketHandler())
 	up := httptest.NewServer(mux)
@@ -175,7 +174,6 @@ func TestMaxSessionsPerConnRejectsOverflow(t *testing.T) {
 	cl1 := dialTestSSH(t, wsURL, currentUser(t), signer)
 	cl2 := dialTestSSH(t, wsURL, currentUser(t), signer)
 
-	// Open 2 sessions on cl1 (at cap) — should succeed.
 	s1, err := cl1.NewSession()
 	if err != nil {
 		t.Fatalf("session 1: %v", err)
@@ -189,7 +187,6 @@ func TestMaxSessionsPerConnRejectsOverflow(t *testing.T) {
 		t.Fatalf("session 2: %v", err)
 	}
 
-	// Third session on same conn (cl1) must fail — cap is per-conn.
 	_, err = cl1.NewSession()
 	if err == nil {
 		t.Fatal("third session on same conn should have been rejected")
@@ -202,7 +199,6 @@ func TestMaxSessionsPerConnRejectsOverflow(t *testing.T) {
 		t.Fatalf("reason = %v, want ResourceShortage", openErr.Reason)
 	}
 
-	// Session on a new conn should also succeed (cap is per-conn).
 	cl3 := dialTestSSH(t, wsURL, currentUser(t), signer)
 	s3, err := cl3.NewSession()
 	if err != nil {
@@ -240,13 +236,11 @@ func TestMaxChildrenSemReleased(t *testing.T) {
 	cl2 := dialTestSSH(t, wsURL, currentUser(t), signer)
 	cl3 := dialTestSSH(t, wsURL, currentUser(t), signer)
 
-	// Start two long-running sessions.
 	s1, _ := cl1.NewSession()
 	s1.Start("sleep 60")
 	s2, _ := cl2.NewSession()
 	s2.Start("sleep 60")
 
-	// Third should fail (sem full).
 	s3, err := cl3.NewSession()
 	if err != nil {
 		t.Fatalf("third session open: %v", err)
@@ -257,11 +251,9 @@ func TestMaxChildrenSemReleased(t *testing.T) {
 	}
 	s3.Close()
 
-	// Close first session — sem released.
 	s1.Close()
 	time.Sleep(300 * time.Millisecond)
 
-	// New spawn should now succeed (proving sem release).
 	cl4 := dialTestSSH(t, wsURL, currentUser(t), signer)
 	s4, err := cl4.NewSession()
 	if err != nil {
