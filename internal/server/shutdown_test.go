@@ -1,14 +1,6 @@
 package server
 
 import (
-	"io"
-	"log/slog"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"os/user"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -47,7 +39,7 @@ func TestWaitDrainsActiveSessions(t *testing.T) {
 
 func TestWaitTimeoutReturnsFalseOnHungSession(t *testing.T) {
 	signer, line := testSigner(t)
-	shortSrv, shortWSURL := newTestServerWithTimeout(t, line, 0, 500*time.Millisecond)
+	shortSrv, shortWSURL := newTestServer(t, line, 0)
 	shortCl := dialTestSSH(t, shortWSURL, currentUser(t), signer)
 	shortSess, err := shortCl.NewSession()
 	if err != nil {
@@ -73,25 +65,4 @@ func TestWaitTimeoutReturnsFalseOnHungSession(t *testing.T) {
 	shortCl.Close()
 }
 
-func newTestServerWithTimeout(t *testing.T, authorizedKeys string, rate float64, timeout time.Duration) (*Server, string) {
-	t.Helper()
-	hostSigner, _ := testSigner(t)
-	akPath := filepath.Join(t.TempDir(), "authorized_keys")
-	if err := os.WriteFile(akPath, []byte(authorizedKeys), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	s := New(Config{
-		Signer:             hostSigner,
-		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Rate:               rate,
-		Burst:              1,
-		AuthorizedKeysPath: func(*user.User) string { return akPath },
-		ShutdownTimeout:    timeout,
-	})
-	t.Cleanup(s.Close)
-	mux := http.NewServeMux()
-	mux.Handle("/ws", s.WebSocketHandler())
-	up := httptest.NewServer(mux)
-	t.Cleanup(up.Close)
-	return s, "ws" + strings.TrimPrefix(up.URL, "http") + "/ws"
-}
+
