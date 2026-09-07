@@ -87,11 +87,20 @@ types are exported.
 
 ## Testing
 
-- `checkStrictModes`: table-driven — pass (`0600`/`0700`, root-owned file), reject
-  (group-writable file, world-writable dir, group-writable home, wrong-owner file).
-- Handshake deadline: inject a fake `net.Conn` into `serveConn` recording `SetDeadline`
-  calls; assert deadline set before handshake and cleared after (fixes the current
-  no-coverage gap on `serveConn`).
+- `checkStrictModes`: table-driven, split by privilege requirements:
+  - **Always run (mode bits only, ordinary CI):** pass (`0600` key in `0700` dir);
+    reject group-writable file, world-writable dir, group-writable home.
+  - **Ownership cases, skipped unless `os.Geteuid() == 0`:** root-owned file passes;
+    wrong-owner file rejected. These need `chown` to another uid/root, which ordinary
+    CI cannot do — run opportunistically as root.
+- Handshake deadline: recording `net.Conn` wrapper around the conn passed to `serveConn`.
+  - **Failure path:** fake/stalling conn → assert `SetDeadline` was called before the
+    handshake attempt and the conn was closed on deadline expiry.
+  - **Success path:** `net.Pipe` plus a real in-process SSH client handshake
+    (`ssh.NewClientConn` with `InsecureSkipVerify`, test host key signer, authorized test
+    key) → assert the deadline is cleared after `ssh.NewServerConn` returns successfully.
+    If this proves flaky during planning, the pre-approved fallback is a small unexported
+    handshake function seam. (Fixes the current no-coverage gap on `serveConn`.)
 - Rate limiter: insert > `maxEntries` distinct keys; assert size cap holds, oldest evicted,
   recently-seen entries survive.
 - `go test ./...` green, including existing `auth_test`, `ratelimit_test`, `server_test`,
