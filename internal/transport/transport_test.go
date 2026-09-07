@@ -87,20 +87,25 @@ func TestDialSendsBinaryFrames(t *testing.T) {
 }
 
 func TestReadLimitRejectsOversizedMessage(t *testing.T) {
+	oversizedRejected := make(chan struct{}, 1)
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		nc, err := Accept(w, r)
+		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			CompressionMode: websocket.CompressionDisabled,
+		})
 		if err != nil {
 			t.Errorf("Accept: %v", err)
 			return
 		}
-		defer nc.Close()
-		buf := make([]byte, 4096)
-		for {
-			_, err := nc.Read(buf)
-			if err != nil {
-				return
-			}
+		c.SetReadLimit(1 << 20)
+		defer c.Close(websocket.StatusNormalClosure, "")
+		readCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, _, err = c.Read(readCtx)
+		select {
+		case oversizedRejected <- struct{}{}:
+		default:
 		}
+		_ = err
 	}))
 	defer up.Close()
 
@@ -121,7 +126,11 @@ func TestReadLimitRejectsOversizedMessage(t *testing.T) {
 		t.Fatalf("write large msg: %v", err)
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-oversizedRejected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for server to reject oversized frame")
+	}
 
 	nc2, err := Dial(ctx, wsURL)
 	if err != nil {
