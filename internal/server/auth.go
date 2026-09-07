@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -70,6 +73,9 @@ func (s *Server) loadAuthorizedKeys(u *user.User) ([]ssh.PublicKey, error) {
 	if s.authorizedKeysPath != nil {
 		path = s.authorizedKeysPath(u)
 	}
+	if err := checkStrictModes(u, path); err != nil {
+		return nil, err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -90,4 +96,36 @@ func (s *Server) loadAuthorizedKeys(u *user.User) ([]ssh.PublicKey, error) {
 		keys = append(keys, key)
 	}
 	return keys, scanner.Err()
+}
+
+// checkStrictModes enforces the same invariants as OpenSSH StrictModes: the
+// authorized_keys file, its .ssh directory, and the user's home directory must
+// be owned by the user (or root) and must not be group- or world-writable.
+// Any violation is an authentication error (fail closed).
+func checkStrictModes(u *user.User, path string) error {
+	if u.HomeDir == "" {
+		return errors.New("user has no home directory")
+	}
+	uid64, err := strconv.ParseUint(u.Uid, 10, 32)
+	if err != nil {
+		return fmt.Errorf("invalid uid %q for user %q", u.Uid, u.Username)
+	}
+	uid := uint32(uid64)
+	for _, dir := range []string{u.HomeDir, filepath.Dir(path), path} {
+		fi, err := os.Stat(dir)
+		if err != nil {
+			return err
+		}
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok {
+			return fmt.Errorf("permission checks unsupported on this platform (%s)", dir)
+		}
+		if st.Uid != uid && st.Uid != 0 {
+			return fmt.Errorf("%s: owned by uid %d, want %d or root", dir, st.Uid, uid)
+		}
+		if perm := fi.Mode().Perm(); perm&0o022 != 0 {
+			return fmt.Errorf("%s: permissions %04o allow group/other writes", dir, perm)
+		}
+	}
+	return nil
 }
