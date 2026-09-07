@@ -22,7 +22,7 @@ func Accept(w http.ResponseWriter, r *http.Request) (net.Conn, error) {
 		return nil, err
 	}
 	go keepalive(r.Context(), c)
-	return websocket.NetConn(r.Context(), c, websocket.MessageBinary), nil
+	return websocket.NetConn(context.Background(), c, websocket.MessageBinary), nil
 }
 
 func Dial(ctx context.Context, rawURL string) (net.Conn, error) {
