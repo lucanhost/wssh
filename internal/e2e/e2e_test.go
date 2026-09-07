@@ -41,7 +41,9 @@ func startServer(t *testing.T, rate float64, burst int) (target *client.Target, 
 		t.Fatal(err)
 	}
 	akPath := filepath.Join(t.TempDir(), "authorized_keys")
-	os.WriteFile(akPath, ssh.MarshalAuthorizedKey(clientSigner.PublicKey()), 0o600)
+	if err := os.WriteFile(akPath, ssh.MarshalAuthorizedKey(clientSigner.PublicKey()), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	srv := server.New(server.Config{
 		Signer: hostSigner,
@@ -56,7 +58,10 @@ func startServer(t *testing.T, rate float64, burst int) (target *client.Target, 
 	up := httptest.NewServer(mux)
 	t.Cleanup(up.Close)
 
-	u, _ := user.Current()
+	u, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
 	target, err = client.ParseTarget("ws://" + u.Username + "@" + strings.TrimPrefix(up.URL, "http://") + "/ws")
 	if err != nil {
 		t.Fatal(err)
@@ -82,9 +87,12 @@ func TestE2EExec(t *testing.T) {
 
 func TestE2EExitCode(t *testing.T) {
 	target, signer := startServer(t, 0, 0)
-	cl, _ := client.Connect(context.Background(), target, []ssh.Signer{signer}, ssh.InsecureIgnoreHostKey())
+	cl, err := client.Connect(context.Background(), target, []ssh.Signer{signer}, ssh.InsecureIgnoreHostKey())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
 	defer cl.Close()
-	err := client.RunCommand(cl, "exit 4", io.Discard, io.Discard)
+	err = client.RunCommand(cl, "exit 4", io.Discard, io.Discard)
 	if client.ExitCode(err) != 4 {
 		t.Fatalf("exit code = %d (err=%v)", client.ExitCode(err), err)
 	}
