@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -211,6 +212,44 @@ func TestHostKeyCallbackConcurrent(t *testing.T) {
 	for err := range errs {
 		if err != nil {
 			t.Errorf("concurrent callback: %v", err)
+		}
+	}
+}
+
+func TestKnownHostsRoundTripIPv6AndIPv4(t *testing.T) {
+	dir := t.TempDir()
+	kh := filepath.Join(dir, "known_hosts")
+	if err := os.WriteFile(kh, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, key := testKey(t)
+	_, other := testKey(t)
+
+	hostnames := []string{
+		net.JoinHostPort("2001:db8::1", "8080"),
+		net.JoinHostPort("2001:db8::2", "80"),
+		net.JoinHostPort("203.0.113.5", "8080"),
+	}
+	for _, hostname := range hostnames {
+		if err := appendKnownHost(kh, hostname, key); err != nil {
+			t.Fatalf("append %q: %v", hostname, err)
+		}
+	}
+	khcb, err := knownhosts.New(kh)
+	if err != nil {
+		t.Fatalf("knownhosts.New: %v", err)
+	}
+	for _, hostname := range hostnames {
+		if err := khcb(hostname, tcpAddr(hostname), key); err != nil {
+			t.Fatalf("entry %q rejected: %v", hostname, err)
+		}
+		err := khcb(hostname, tcpAddr(hostname), other)
+		if err == nil {
+			t.Fatalf("changed key accepted for %q", hostname)
+		}
+		var keyErr *knownhosts.KeyError
+		if !errors.As(err, &keyErr) {
+			t.Fatalf("changed key for %q: want *knownhosts.KeyError, got %T: %v", hostname, err, err)
 		}
 	}
 }
