@@ -160,7 +160,6 @@ func TestReadLimitRejectsOversizedMessage(t *testing.T) {
 		t.Fatalf("write oversized: %v", err)
 	}
 
-	// Give the server time to read and detect the limit violation.
 	time.Sleep(200 * time.Millisecond)
 	nc2.Close()
 }
