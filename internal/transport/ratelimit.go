@@ -7,6 +7,10 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// maxEntries bounds the per-IP entry map so spoofed or distributed sources
+// cannot grow it without limit between sweeps.
+const maxEntries = 10000
+
 type rlEntry struct {
 	limiter  *rate.Limiter
 	lastSeen time.Time
@@ -41,11 +45,37 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	defer rl.mu.Unlock()
 	e, ok := rl.entries[ip]
 	if !ok {
+		if len(rl.entries) >= maxEntries {
+			rl.evictLocked()
+		}
 		e = &rlEntry{limiter: rate.NewLimiter(rl.rate, rl.burst)}
 		rl.entries[ip] = e
 	}
 	e.lastSeen = time.Now()
 	return e.limiter.Allow()
+}
+
+// evictLocked makes room for one new entry: it first drops entries idle past
+// the TTL; if none are stale, it drops the least-recently-seen entry.
+// Caller must hold rl.mu.
+func (rl *RateLimiter) evictLocked() {
+	cutoff := time.Now().Add(-rl.ttl)
+	for ip, e := range rl.entries {
+		if e.lastSeen.Before(cutoff) {
+			delete(rl.entries, ip)
+		}
+	}
+	if len(rl.entries) < maxEntries {
+		return
+	}
+	var oldestIP string
+	var oldest time.Time
+	for ip, e := range rl.entries {
+		if oldestIP == "" || e.lastSeen.Before(oldest) {
+			oldestIP, oldest = ip, e.lastSeen
+		}
+	}
+	delete(rl.entries, oldestIP)
 }
 
 func (rl *RateLimiter) sweep() {
