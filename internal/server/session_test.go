@@ -85,8 +85,15 @@ func TestShellWithoutPTY(t *testing.T) {
 		t.Fatalf("Shell without pty: %v", err)
 	}
 	io.WriteString(stdin, "echo pipes-ok\nexit\n")
-	if err := sess.Wait(); err != nil {
-		t.Fatalf("Wait: %v", err)
+	done := make(chan error, 1)
+	go func() { done <- sess.Wait() }()
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("shell session did not exit")
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
 	}
 	if !bytes.Contains(out.Bytes(), []byte("pipes-ok")) {
 		t.Fatalf("output %q missing %q", out.String(), "pipes-ok")
@@ -112,7 +119,14 @@ func TestWindowChangeAfterSpawn(t *testing.T) {
 		t.Fatalf("WindowChange: %v", err)
 	}
 	io.WriteString(stdin, "echo resized\nexit\n")
-	if err := sess.Wait(); err != nil {
-		t.Fatalf("Wait: %v", err)
+	done := make(chan error, 1)
+	go func() { done <- sess.Wait() }()
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("shell session did not exit")
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
 	}
 }
