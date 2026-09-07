@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -91,5 +92,20 @@ func TestExitCodeMapping(t *testing.T) {
 	}
 	if ExitCode(&ExitError{Code: 3}) != 3 {
 		t.Fatal("ExitError → code")
+	}
+}
+
+// TestConnectSurvivesDialTimeout proves NetConn is not anchored to the dial
+// context — a command run after connectTimeout has elapsed must still succeed.
+func TestConnectSurvivesDialTimeout(t *testing.T) {
+	cl := loopbackClient(t)
+	time.Sleep(1100 * time.Millisecond)
+	var out bytes.Buffer
+	err := RunCommand(cl, "echo alive", &out, io.Discard)
+	if err != nil {
+		t.Fatalf("RunCommand after sleep: %v", err)
+	}
+	if out.String() != "alive\n" {
+		t.Fatalf("output = %q", out.String())
 	}
 }

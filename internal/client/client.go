@@ -19,7 +19,9 @@ import (
 const connectTimeout = 10 * time.Second
 
 func Connect(ctx context.Context, t *Target, signers []ssh.Signer, hostKeyCb ssh.HostKeyCallback) (*ssh.Client, error) {
-	netConn, err := transport.Dial(ctx, t.WebSocketURL())
+	dialCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+	netConn, err := transport.Dial(dialCtx, t.WebSocketURL())
 	if err != nil {
 		return nil, fmt.Errorf("websocket dial: %w", err)
 	}

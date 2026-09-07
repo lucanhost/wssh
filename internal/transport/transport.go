@@ -33,7 +33,7 @@ func Dial(ctx context.Context, rawURL string) (net.Conn, error) {
 		return nil, err
 	}
 	go keepalive(context.Background(), c)
-	return websocket.NetConn(ctx, c, websocket.MessageBinary), nil
+	return websocket.NetConn(context.Background(), c, websocket.MessageBinary), nil
 }
 
 func keepalive(ctx context.Context, c *websocket.Conn) {
