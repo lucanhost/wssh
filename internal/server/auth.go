@@ -77,6 +77,7 @@ func (s *Server) loadAuthorizedKeys(u *user.User) ([]ssh.PublicKey, error) {
 	defer f.Close()
 	var keys []ssh.PublicKey
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 || line[0] == '#' {

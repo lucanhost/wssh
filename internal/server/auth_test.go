@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"io"
@@ -104,5 +105,24 @@ func TestPublicKeyCallbackRejectsOtherUserWhenNonRoot(t *testing.T) {
 	signer, _ := testSigner(t)
 	if _, err := s.publicKeyCallback(connMeta{user: "nosuchuser"}, signer.PublicKey()); err == nil {
 		t.Fatal("callback accepted unknown user in non-root mode")
+	}
+}
+
+func TestLoadAuthorizedKeysLongLine(t *testing.T) {
+	signer, line := testSigner(t)
+	// Pad the comment field well past the 64 KB bufio.Scanner default limit
+	// (100 KB line). A certificate/sk-key with many principals behaves the same.
+	long := line + " " + strings.Repeat("x", 100*1024)
+	s := newAuthServer(t, long+"\n")
+	u, _ := user.Current()
+	keys, err := s.loadAuthorizedKeys(u)
+	if err != nil {
+		t.Fatalf("loadAuthorizedKeys with 100KB line: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("got %d keys, want 1", len(keys))
+	}
+	if !bytes.Equal(keys[0].Marshal(), signer.PublicKey().Marshal()) {
+		t.Fatal("parsed key does not match generated key")
 	}
 }
