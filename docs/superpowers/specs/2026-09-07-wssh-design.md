@@ -336,3 +336,47 @@ tasks above already effect.
    `internal/server/auth.go`), returning the 7th colon-delimited field. Non-Linux
    systems without `/etc/passwd` fall back to an empty string, which the server
    treats as `/bin/sh`.
+
+## Third-batch amendments (2026-09-07 — production-readiness + config-file batch)
+
+The following behavior changes are introduced by the third remediation batch
+(plan: `docs/superpowers/plans/2026-09-07-wssh-prodreadiness-config.md`). All
+are additive; none contradict the requirements above.
+
+(a) **NEW `-trusted-proxies` flag + real-client-IP extraction (replaces the
+    previous "rate limiting keys on RemoteAddr; enforce at the proxy" stance —
+    supersedes Post-design amendment 2).** When the direct TCP peer is inside
+    one of the `-trusted-proxies` CIDRs (comma-separated; bare IPv4 → `/32`,
+    bare IPv6 → `/128`), the per-IP rate limiter keys on the client IP taken
+    from `CF-Connecting-IP`, then `X-Real-IP`, then the rightmost-untrusted
+    entry of `X-Forwarded-For`. Untrusted peers can never influence their
+    rate-limit key. Empty flag (default) → exact previous RemoteAddr behavior.
+
+(b) **IPv6 is now supported** (removed from the "Out of Scope" list). IPv6
+    targets round-trip through parsing, dialing, and known_hosts verification
+    (pinned by tests). Remaining IPv6 limitations, recorded as future items:
+    link-local zone IDs (`fe80::1%eth0`) unsupported; rate limiting stays
+    per-address (no `/64` subnet grouping).
+
+(c) **Plaintext `ws://` advisory on the `wssh` client.** When the target scheme
+    is `ws://`, the client prints a one-line note to stderr before connecting
+    (SSH crypto still applies; `wss://` recommended on untrusted networks). No
+    suppression flag.
+
+(d) **NEW `-config` flag + TOML config-file support on `wsshd`** via
+    `github.com/BurntSushi/toml` (module dependencies 5 → 6). Precedence:
+    explicit CLI flag > config file > built-in default; "explicit" detected via
+    `flag.Visit`. Omitting `-config` is byte-identical to pure-flag behavior.
+    `rate = 0` means "disable rate limiting" (pointer-field semantics), not
+    "absent". Schema documented in README; no env expansion, includes, hot
+    reload, or default-path auto-discovery.
+
+Additional traceability notes:
+
+- known_hosts entries written by `appendKnownHost` keep an explicit `:port`
+  (including 80/443) because the client always connects with an explicit port;
+  the append→`knownhosts.New` round-trip is the acceptance criterion (verified
+  for bracketed IPv6 and plain IPv4). This refines the earlier "[host]:port
+  form (port omitted for 80/443)" phrasing above.
+- The go.mod language version is `go 1.26.0` (spec's "Go 1.21+" floor remains
+  satisfied as a floor).
