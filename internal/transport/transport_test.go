@@ -163,3 +163,37 @@ func TestReadLimitRejectsOversizedMessage(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	nc2.Close()
 }
+
+func TestKeepaliveExitsOnClose(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nc, err := Accept(w, r)
+		if err != nil {
+			t.Errorf("Accept: %v", err)
+			return
+		}
+		defer nc.Close()
+		io.Copy(io.Discard, nc)
+	}))
+	defer up.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(up.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	nc, err := Dial(ctx, wsURL)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+
+	wd, ok := nc.(*connWithDone)
+	if !ok {
+		nc.Close()
+		t.Fatalf("Dial returned %T, want *connWithDone", nc)
+	}
+	nc.Close()
+
+	select {
+	case <-wd.done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("done channel not closed after net.Conn.Close(); keepalive goroutine will leak")
+	}
+}
