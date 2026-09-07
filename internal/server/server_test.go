@@ -477,21 +477,21 @@ func TestServeConnClearsDeadlineAfterHandshake(t *testing.T) {
 	go ssh.DiscardRequests(reqs)
 	_ = chans // test opens no channels; closing the client ends serveConn
 
+	var rc *recordingConn
 	var ok bool
 	for i := 0; i < 100; i++ {
 		select {
-		case rc := <-rcCh:
-			rc.mu.Lock()
-			if len(rc.deadline) > 0 {
-				last := rc.deadline[len(rc.deadline)-1]
-				if last.IsZero() {
-					ok = true
-				}
-			}
-			rc.mu.Unlock()
+		case rc = <-rcCh:
 		case err := <-errCh:
 			t.Fatalf("Accept failed: %v", err)
 		default:
+		}
+		if rc != nil {
+			rc.mu.Lock()
+			if len(rc.deadline) > 0 && rc.deadline[len(rc.deadline)-1].IsZero() {
+				ok = true
+			}
+			rc.mu.Unlock()
 		}
 		if ok {
 			break
