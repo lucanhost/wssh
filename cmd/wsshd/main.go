@@ -18,14 +18,21 @@ import (
 
 func main() {
 	var (
-		addr    = flag.String("addr", ":8080", "HTTP listen address")
-		path    = flag.String("path", "/ws", "WebSocket endpoint path")
-		hostKey = flag.String("hostkey", "/etc/wssh/host_key", "SSH host key path (ed25519/RSA; auto-generated when missing)")
-		cert    = flag.String("cert", "", "TLS certificate file (enables HTTPS/WSS)")
-		key     = flag.String("key", "", "TLS private key file")
-		rate    = flag.Float64("rate", 1, "upgrade requests per second per IP (burst 5); 0 disables")
+		addr           = flag.String("addr", ":8080", "HTTP listen address")
+		path           = flag.String("path", "/ws", "WebSocket endpoint path")
+		hostKey        = flag.String("hostkey", "/etc/wssh/host_key", "SSH host key path (ed25519/RSA; auto-generated when missing)")
+		cert           = flag.String("cert", "", "TLS certificate file (enables HTTPS/WSS)")
+		key            = flag.String("key", "", "TLS private key file")
+		rate           = flag.Float64("rate", 1, "upgrade requests per second per IP (burst 5); 0 disables")
+		trustedProxies = flag.String("trusted-proxies", "", "comma-separated CIDRs/bare IPs trusted to send forwarding headers (X-Forwarded-For, X-Real-IP, CF-Connecting-IP)")
 	)
 	flag.Parse()
+	var proxyList []string
+	for _, p := range strings.Split(*trustedProxies, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			proxyList = append(proxyList, p)
+		}
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	if (*cert == "") != (*key == "") {
@@ -43,10 +50,11 @@ func main() {
 		os.Exit(1)
 	}
 	srv := server.New(server.Config{
-		Signer: signer,
-		Logger: logger,
-		Rate:   *rate,
-		Burst:  5,
+		Signer:         signer,
+		Logger:         logger,
+		Rate:           *rate,
+		Burst:          5,
+		TrustedProxies: proxyList,
 	})
 	defer srv.Close()
 
@@ -76,7 +84,9 @@ func main() {
 		"mode", map[bool]string{true: "root", false: "non-root"}[srv.Root()],
 		"hostkey", *hostKey,
 	)
-	if *rate > 0 {
+	if len(proxyList) > 0 {
+		logger.Info("trusting client IP from forwarding headers; trusted proxies: " + strings.Join(proxyList, ","))
+	} else if *rate > 0 {
 		logger.Info("rate limiting keys on RemoteAddr; if fronted by a TLS proxy, enforce rate limits at the proxy")
 	}
 

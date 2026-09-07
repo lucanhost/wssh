@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/user"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ type Config struct {
 	AuthorizedKeysPath func(*user.User) string
 	MaxSessionsPerConn int
 	MaxChildren        int
+	TrustedProxies     []string
 }
 
 type Server struct {
@@ -32,6 +34,7 @@ type Server struct {
 	currentUsername    string
 	authorizedKeysPath func(*user.User) string
 	limiter            *transport.RateLimiter
+	trustedProxies     []*net.IPNet
 	wg                 sync.WaitGroup
 	maxSessionsPerConn int
 	childrenSem        chan struct{}
@@ -58,6 +61,25 @@ func New(cfg Config) *Server {
 		maxSessionsPerConn: cfg.MaxSessionsPerConn,
 		childrenSem:        make(chan struct{}, cfg.MaxChildren),
 	}
+	for _, entry := range cfg.TrustedProxies {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if ip := net.ParseIP(entry); ip != nil {
+			if ip.To4() != nil {
+				entry += "/32"
+			} else {
+				entry += "/128"
+			}
+		}
+		_, cidr, err := net.ParseCIDR(entry)
+		if err != nil {
+			s.logger.Warn("ignoring invalid trusted proxy entry", "entry", entry, "err", err)
+			continue
+		}
+		s.trustedProxies = append(s.trustedProxies, cidr)
+	}
 	if cfg.Rate > 0 {
 		s.limiter = transport.NewRateLimiter(cfg.Rate, cfg.Burst, time.Minute)
 	}
@@ -82,10 +104,7 @@ func (s *Server) Root() bool { return s.root }
 
 func (s *Server) WebSocketHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			ip = r.RemoteAddr
-		}
+		ip := s.clientIP(r)
 		if s.limiter != nil && !s.limiter.Allow(ip) {
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
