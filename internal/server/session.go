@@ -90,6 +90,7 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 		havePTY   bool
 		winSize   pty.Winsize
 		mu        sync.Mutex
+		semHeld   bool
 	)
 	defer func() {
 		if cmd != nil && cmd.Process != nil {
@@ -155,6 +156,16 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 				req.Reply(false, nil)
 				continue
 			}
+			if s.childrenSem != nil {
+				select {
+				case s.childrenSem <- struct{}{}:
+					semHeld = true
+				default:
+					s.logger.Warn("max children reached", "user", u.Username, "type", req.Type)
+					req.Reply(false, nil)
+					continue
+				}
+			}
 			var shellArgs []string
 			kind := req.Type
 			if req.Type == "exec" {
@@ -175,7 +186,12 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 			}
 			req.Reply(true, nil)
 			s.logger.Info("session opened", "user", u.Username, "type", kind, "pty", havePTY)
-			go s.reap(channel, cmd, ptyFile, stdinPipe, &mu, u)
+			release := func() {
+				if semHeld && s.childrenSem != nil {
+					<-s.childrenSem
+				}
+			}
+			go s.reap(channel, cmd, ptyFile, stdinPipe, &mu, u, release)
 
 		default:
 			req.Reply(false, nil)
@@ -259,7 +275,8 @@ func credentialsFor(u *user.User) (*syscall.Credential, error) {
 	return &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: groups}, nil
 }
 
-func (s *Server) reap(channel ssh.Channel, cmd *exec.Cmd, ptyFile *os.File, stdinPipe *os.File, mu *sync.Mutex, u *user.User) {
+func (s *Server) reap(channel ssh.Channel, cmd *exec.Cmd, ptyFile *os.File, stdinPipe *os.File, mu *sync.Mutex, u *user.User, release func()) {
+	defer release()
 	var copyWG sync.WaitGroup
 	if ptyFile != nil {
 		copyWG.Add(1)

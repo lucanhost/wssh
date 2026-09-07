@@ -21,6 +21,8 @@ type Config struct {
 	Rate                 float64
 	Burst                int
 	AuthorizedKeysPath   func(*user.User) string
+	MaxSessionsPerConn   int
+	MaxChildren          int
 }
 
 type Server struct {
@@ -31,6 +33,8 @@ type Server struct {
 	authorizedKeysPath   func(*user.User) string
 	limiter              *transport.RateLimiter
 	wg                   sync.WaitGroup
+	maxSessionsPerConn   int
+	childrenSem          chan struct{}
 }
 
 func New(cfg Config) *Server {
@@ -40,11 +44,19 @@ func New(cfg Config) *Server {
 	if cfg.Burst == 0 {
 		cfg.Burst = 5
 	}
+	if cfg.MaxSessionsPerConn == 0 {
+		cfg.MaxSessionsPerConn = 10
+	}
+	if cfg.MaxChildren == 0 {
+		cfg.MaxChildren = 256
+	}
 	s := &Server{
 		logger:               cfg.Logger,
 		root:                 os.Geteuid() == 0,
 		currentUsername:      currentUserFromOS(),
 		authorizedKeysPath:   cfg.AuthorizedKeysPath,
+		maxSessionsPerConn:   cfg.MaxSessionsPerConn,
+		childrenSem:          make(chan struct{}, cfg.MaxChildren),
 	}
 	if cfg.Rate > 0 {
 		s.limiter = transport.NewRateLimiter(cfg.Rate, cfg.Burst, time.Minute)
@@ -100,14 +112,21 @@ func (s *Server) serveConn(netConn net.Conn, remoteAddr string) {
 	go ssh.DiscardRequests(reqs)
 	s.logger.Info("connection authenticated", "user", sconn.User(), "remote", remoteAddr)
 
+	var sessionCount int
 	for newChannel := range chans {
 		if newChannel.ChannelType() != "session" {
 			_ = newChannel.Reject(ssh.UnknownChannelType, "unsupported channel type")
 			continue
 		}
+		if sessionCount >= s.maxSessionsPerConn {
+			_ = newChannel.Reject(ssh.ResourceShortage, "too many sessions")
+			continue
+		}
+		sessionCount++
 		channel, channelRequests, err := newChannel.Accept()
 		if err != nil {
 			s.logger.Warn("channel accept failed", "err", err)
+			sessionCount--
 			continue
 		}
 		ext := sconn.Permissions.Extensions

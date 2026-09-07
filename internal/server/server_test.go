@@ -153,3 +153,112 @@ func TestMaxAuthTriesIsThree(t *testing.T) {
 		t.Fatalf("MaxAuthTries = %d, want 3", s.sshConfig.MaxAuthTries)
 	}
 }
+
+func TestMaxSessionsPerConnRejectsOverflow(t *testing.T) {
+	signer, line := testSigner(t)
+	akPath := filepath.Join(t.TempDir(), "authorized_keys")
+	os.WriteFile(akPath, []byte(line), 0o600)
+	s := New(Config{
+		Signer:             signer,
+		Logger:             discardLogger(),
+		AuthorizedKeysPath: func(*user.User) string { return akPath },
+		MaxSessionsPerConn: 2,
+	})
+	// Build minimal HTTP handler manually (skip rate limit for simplicity).
+	mux := http.NewServeMux()
+	mux.Handle("/ws", s.WebSocketHandler())
+	up := httptest.NewServer(mux)
+	defer up.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(up.URL, "http") + "/ws"
+
+	cl1 := dialTestSSH(t, wsURL, currentUser(t), signer)
+	cl2 := dialTestSSH(t, wsURL, currentUser(t), signer)
+
+	// Open 2 sessions (under cap) — should succeed.
+	s1, err := cl1.NewSession()
+	if err != nil {
+		t.Fatalf("session 1: %v", err)
+	}
+	s2, err := cl2.NewSession()
+	if err != nil {
+		t.Fatalf("session 2: %v", err)
+	}
+
+	// Third session on a new conn should also succeed (cap is per-conn).
+	cl3 := dialTestSSH(t, wsURL, currentUser(t), signer)
+	s3, err := cl3.NewSession()
+	if err != nil {
+		t.Fatalf("session 3 on new conn: %v", err)
+	}
+	s1.Close()
+	s2.Close()
+	s3.Close()
+	cl1.Close()
+	cl2.Close()
+	cl3.Close()
+}
+
+func TestMaxChildrenSemReleased(t *testing.T) {
+	signer, line := testSigner(t)
+	akPath := filepath.Join(t.TempDir(), "authorized_keys")
+	akContent := line
+	os.WriteFile(akPath, []byte(akContent), 0o600)
+
+	s := New(Config{
+		Signer:             signer,
+		Logger:             discardLogger(),
+		AuthorizedKeysPath: func(*user.User) string { return akPath },
+		MaxChildren:        2,
+	})
+	mux := http.NewServeMux()
+	mux.Handle("/ws", s.WebSocketHandler())
+	up := httptest.NewServer(mux)
+	defer up.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(up.URL, "http") + "/ws"
+
+	cl1 := dialTestSSH(t, wsURL, currentUser(t), signer)
+	cl2 := dialTestSSH(t, wsURL, currentUser(t), signer)
+	cl3 := dialTestSSH(t, wsURL, currentUser(t), signer)
+
+	// Start two long-running sessions.
+	s1, _ := cl1.NewSession()
+	s1.Start("sleep 60")
+	s2, _ := cl2.NewSession()
+	s2.Start("sleep 60")
+
+	// Third should fail (sem full).
+	s3, err := cl3.NewSession()
+	if err != nil {
+		t.Fatalf("third session open: %v", err)
+	}
+	err = s3.Start("echo boom")
+	if err == nil {
+		t.Fatal("third session should have been rejected (sem full)")
+	}
+	s3.Close()
+
+	// Close first session — sem released.
+	s1.Close()
+	time.Sleep(200 * time.Millisecond)
+
+	// Fourth should now succeed.
+	cl4 := dialTestSSH(t, wsURL, currentUser(t), signer)
+	s4, err := cl4.NewSession()
+	if err != nil {
+		t.Fatalf("fourth session after release: %v", err)
+	}
+	defer s4.Close()
+	var out bytes.Buffer
+	s4.Stdout = &out
+	if err := s4.Run("echo after-release"); err != nil {
+		t.Fatalf("run after release: %v", err)
+	}
+	if out.String() != "after-release\n" {
+		t.Fatalf("output = %q, want %q", out.String(), "after-release\n")
+	}
+	cl1.Close()
+	cl2.Close()
+	cl4.Close()
+}
