@@ -175,23 +175,41 @@ func TestMaxSessionsPerConnRejectsOverflow(t *testing.T) {
 	cl1 := dialTestSSH(t, wsURL, currentUser(t), signer)
 	cl2 := dialTestSSH(t, wsURL, currentUser(t), signer)
 
-	// Open 2 sessions (under cap) — should succeed.
+	// Open 2 sessions on cl1 (at cap) — should succeed.
 	s1, err := cl1.NewSession()
 	if err != nil {
 		t.Fatalf("session 1: %v", err)
+	}
+	s1b, err := cl1.NewSession()
+	if err != nil {
+		t.Fatalf("session 1b: %v", err)
 	}
 	s2, err := cl2.NewSession()
 	if err != nil {
 		t.Fatalf("session 2: %v", err)
 	}
 
-	// Third session on a new conn should also succeed (cap is per-conn).
+	// Third session on same conn (cl1) must fail — cap is per-conn.
+	_, err = cl1.NewSession()
+	if err == nil {
+		t.Fatal("third session on same conn should have been rejected")
+	}
+	openErr, ok := err.(*ssh.OpenChannelError)
+	if !ok {
+		t.Fatalf("expected *ssh.OpenChannelError, got %T: %v", err, err)
+	}
+	if openErr.Reason != ssh.ResourceShortage {
+		t.Fatalf("reason = %v, want ResourceShortage", openErr.Reason)
+	}
+
+	// Session on a new conn should also succeed (cap is per-conn).
 	cl3 := dialTestSSH(t, wsURL, currentUser(t), signer)
 	s3, err := cl3.NewSession()
 	if err != nil {
 		t.Fatalf("session 3 on new conn: %v", err)
 	}
 	s1.Close()
+	s1b.Close()
 	s2.Close()
 	s3.Close()
 	cl1.Close()
@@ -241,9 +259,9 @@ func TestMaxChildrenSemReleased(t *testing.T) {
 
 	// Close first session — sem released.
 	s1.Close()
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 
-	// Fourth should now succeed.
+	// New spawn should now succeed (proving sem release).
 	cl4 := dialTestSSH(t, wsURL, currentUser(t), signer)
 	s4, err := cl4.NewSession()
 	if err != nil {
@@ -260,5 +278,6 @@ func TestMaxChildrenSemReleased(t *testing.T) {
 	}
 	cl1.Close()
 	cl2.Close()
+	cl3.Close()
 	cl4.Close()
 }
