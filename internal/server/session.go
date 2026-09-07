@@ -13,6 +13,8 @@ import (
 
 	"github.com/creack/pty"
 	"golang.org/x/crypto/ssh"
+
+	"wssh/internal/termval"
 )
 
 type ptyRequest struct {
@@ -112,6 +114,9 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 				continue
 			}
 			term = p.Term
+			if !termval.Valid(term) {
+				term = "xterm-256color"
+			}
 			havePTY = true
 			r, c, ok := clampWinsize(p.Rows, p.Columns)
 			if !ok {

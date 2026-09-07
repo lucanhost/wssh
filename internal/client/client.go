@@ -14,6 +14,7 @@ import (
 	"golang.org/x/term"
 
 	"wssh/internal/transport"
+	"wssh/internal/termval"
 )
 
 const connectTimeout = 10 * time.Second
@@ -128,7 +129,7 @@ func RunShell(c *ssh.Client) error {
 		w, h = 80, 24
 	}
 	termEnv := os.Getenv("TERM")
-	if termEnv == "" {
+	if !termval.Valid(termEnv) {
 		termEnv = "xterm-256color"
 	}
 	if err := sess.RequestPty(termEnv, h, w, nil); err != nil {
