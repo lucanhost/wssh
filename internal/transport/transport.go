@@ -21,9 +21,10 @@ func Accept(w http.ResponseWriter, r *http.Request) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.SetReadLimit(1 << 20)
 	go keepalive(context.Background(), c)
-	return websocket.NetConn(context.Background(), c, websocket.MessageBinary), nil
+	nc := websocket.NetConn(context.Background(), c, websocket.MessageBinary)
+	c.SetReadLimit(1 << 20)
+	return nc, nil
 }
 
 func Dial(ctx context.Context, rawURL string) (net.Conn, error) {
@@ -33,9 +34,10 @@ func Dial(ctx context.Context, rawURL string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.SetReadLimit(1 << 20)
 	go keepalive(context.Background(), c)
-	return websocket.NetConn(context.Background(), c, websocket.MessageBinary), nil
+	nc := websocket.NetConn(context.Background(), c, websocket.MessageBinary)
+	c.SetReadLimit(1 << 20)
+	return nc, nil
 }
 
 func keepalive(ctx context.Context, c *websocket.Conn) {

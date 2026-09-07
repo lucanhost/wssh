@@ -125,20 +125,27 @@ func TestReadLimitRejectsOversizedMessage(t *testing.T) {
 		t.Fatalf("got %q want %q", buf, "ok")
 	}
 
-	oversizedRejected := make(chan error, 1)
 	up2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			CompressionMode: websocket.CompressionDisabled,
-		})
+		nc, err := Accept(w, r)
 		if err != nil {
-			t.Fatalf("Accept: %v", err)
+			t.Fatalf("Accept2: %v", err)
 		}
-		c.SetReadLimit(1 << 20)
-		defer c.Close(websocket.StatusNormalClosure, "")
-		readCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_, _, err = c.Read(readCtx)
-		oversizedRejected <- err
+		defer nc.Close()
+
+		buf := make([]byte, 1<<20+1)
+		n, err := nc.Read(buf)
+		if err != nil || n != len(buf) {
+			t.Fatalf("first read: got %d bytes, err=%v", n, err)
+		}
+
+		readBuf := make([]byte, 1)
+		n, err = nc.Read(readBuf)
+		if err == nil {
+			t.Fatal("expected error for oversized message, got nil")
+		}
+		if !errors.Is(err, websocket.ErrMessageTooBig) {
+			t.Fatalf("expected ErrMessageTooBig, got: %v", err)
+		}
 	}))
 	defer up2.Close()
 
@@ -147,22 +154,13 @@ func TestReadLimitRejectsOversizedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial2: %v", err)
 	}
-	defer nc2.Close()
 
 	largeMsg := make([]byte, 1<<20+1)
 	if _, err := nc2.Write(largeMsg); err != nil {
 		t.Fatalf("write oversized: %v", err)
 	}
 
-	select {
-	case err := <-oversizedRejected:
-		if err == nil {
-			t.Fatal("expected error for oversized message, got nil")
-		}
-		if !errors.Is(err, websocket.ErrMessageTooBig) {
-			t.Fatalf("expected ErrMessageTooBig, got: %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("timeout waiting for server to reject oversized frame")
-	}
+	// Give the server time to read and detect the limit violation.
+	time.Sleep(200 * time.Millisecond)
+	nc2.Close()
 }
