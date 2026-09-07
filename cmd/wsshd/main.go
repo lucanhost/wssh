@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"wssh/internal/server"
 )
@@ -89,6 +90,7 @@ func main() {
 	}
 	logger.Info("shutting down; draining active sessions")
 	_ = hs.Shutdown(context.Background())
-	srv.Wait()
+	const shutdownTimeout = 30 * time.Second
+	srv.WaitTimeout(shutdownTimeout)
 	logger.Info("wsshd stopped")
 }

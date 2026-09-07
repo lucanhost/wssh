@@ -23,6 +23,7 @@ type Config struct {
 	AuthorizedKeysPath   func(*user.User) string
 	MaxSessionsPerConn   int
 	MaxChildren          int
+	ShutdownTimeout      time.Duration
 }
 
 type Server struct {
@@ -35,6 +36,7 @@ type Server struct {
 	wg                   sync.WaitGroup
 	maxSessionsPerConn   int
 	childrenSem          chan struct{}
+	shutdownTimeout      time.Duration
 }
 
 func New(cfg Config) *Server {
@@ -50,6 +52,9 @@ func New(cfg Config) *Server {
 	if cfg.MaxChildren == 0 {
 		cfg.MaxChildren = 256
 	}
+	if cfg.ShutdownTimeout == 0 {
+		cfg.ShutdownTimeout = 30 * time.Second
+	}
 	s := &Server{
 		logger:               cfg.Logger,
 		root:                 os.Geteuid() == 0,
@@ -57,6 +62,7 @@ func New(cfg Config) *Server {
 		authorizedKeysPath:   cfg.AuthorizedKeysPath,
 		maxSessionsPerConn:   cfg.MaxSessionsPerConn,
 		childrenSem:          make(chan struct{}, cfg.MaxChildren),
+		shutdownTimeout:      cfg.ShutdownTimeout,
 	}
 	if cfg.Rate > 0 {
 		s.limiter = transport.NewRateLimiter(cfg.Rate, cfg.Burst, time.Minute)
@@ -143,6 +149,24 @@ func (s *Server) serveConn(netConn net.Conn, remoteAddr string) {
 
 func (s *Server) Wait() {
 	s.wg.Wait()
+}
+
+func (s *Server) WaitTimeout(timeout time.Duration) bool {
+	if timeout <= 0 {
+		timeout = s.shutdownTimeout
+	}
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		s.logger.Warn("shutdown drain timed out", "timeout", timeout)
+		return false
+	}
 }
 
 func (s *Server) Close() {
