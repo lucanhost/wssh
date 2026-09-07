@@ -46,10 +46,10 @@ func startServer(t *testing.T, rate float64, burst int) (target *client.Target, 
 	}
 
 	srv := server.New(server.Config{
-		Signer: hostSigner,
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Rate:   rate,
-		Burst:  burst,
+		Signer:             hostSigner,
+		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Rate:               rate,
+		Burst:              burst,
 		AuthorizedKeysPath: func(*user.User) string { return akPath },
 	})
 	t.Cleanup(srv.Close)

@@ -16,27 +16,27 @@ import (
 )
 
 type Config struct {
-	Signer               ssh.Signer
-	Logger               *slog.Logger
-	Rate                 float64
-	Burst                int
-	AuthorizedKeysPath   func(*user.User) string
-	MaxSessionsPerConn   int
-	MaxChildren          int
-	ShutdownTimeout      time.Duration
+	Signer             ssh.Signer
+	Logger             *slog.Logger
+	Rate               float64
+	Burst              int
+	AuthorizedKeysPath func(*user.User) string
+	MaxSessionsPerConn int
+	MaxChildren        int
+	ShutdownTimeout    time.Duration
 }
 
 type Server struct {
-	sshConfig            ssh.ServerConfig
-	logger               *slog.Logger
-	root                 bool
-	currentUsername      string
-	authorizedKeysPath   func(*user.User) string
-	limiter              *transport.RateLimiter
-	wg                   sync.WaitGroup
-	maxSessionsPerConn   int
-	childrenSem          chan struct{}
-	shutdownTimeout      time.Duration
+	sshConfig          ssh.ServerConfig
+	logger             *slog.Logger
+	root               bool
+	currentUsername    string
+	authorizedKeysPath func(*user.User) string
+	limiter            *transport.RateLimiter
+	wg                 sync.WaitGroup
+	maxSessionsPerConn int
+	childrenSem        chan struct{}
+	shutdownTimeout    time.Duration
 }
 
 func New(cfg Config) *Server {
@@ -56,13 +56,13 @@ func New(cfg Config) *Server {
 		cfg.ShutdownTimeout = 30 * time.Second
 	}
 	s := &Server{
-		logger:               cfg.Logger,
-		root:                 os.Geteuid() == 0,
-		currentUsername:      currentUserFromOS(),
-		authorizedKeysPath:   cfg.AuthorizedKeysPath,
-		maxSessionsPerConn:   cfg.MaxSessionsPerConn,
-		childrenSem:          make(chan struct{}, cfg.MaxChildren),
-		shutdownTimeout:      cfg.ShutdownTimeout,
+		logger:             cfg.Logger,
+		root:               os.Geteuid() == 0,
+		currentUsername:    currentUserFromOS(),
+		authorizedKeysPath: cfg.AuthorizedKeysPath,
+		maxSessionsPerConn: cfg.MaxSessionsPerConn,
+		childrenSem:        make(chan struct{}, cfg.MaxChildren),
+		shutdownTimeout:    cfg.ShutdownTimeout,
 	}
 	if cfg.Rate > 0 {
 		s.limiter = transport.NewRateLimiter(cfg.Rate, cfg.Burst, time.Minute)

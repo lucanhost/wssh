@@ -13,8 +13,8 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
 
-	"wssh/internal/transport"
 	"wssh/internal/termval"
+	"wssh/internal/transport"
 )
 
 const connectTimeout = 10 * time.Second
