@@ -140,7 +140,7 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 			}
 			req.Reply(true, nil)
 			s.logger.Info("session opened", "user", u.Username, "type", kind, "pty", havePTY)
-			go s.reap(channel, cmd, ptyFile, stdinPipe, u)
+			go s.reap(channel, cmd, ptyFile, stdinPipe, &mu, u)
 
 		default:
 			req.Reply(false, nil)
@@ -189,6 +189,7 @@ func (s *Server) startProcess(u *user.User, shell string, term string, havePTY b
 		pr.Close()
 		return nil, nil, nil, err
 	}
+	pr.Close()
 	go io.Copy(pw, channel)
 	return cmd, nil, pw, nil
 }
@@ -218,7 +219,7 @@ func credentialsFor(u *user.User) *syscall.Credential {
 	return &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: groups}
 }
 
-func (s *Server) reap(channel ssh.Channel, cmd *exec.Cmd, ptyFile *os.File, stdinPipe *os.File, u *user.User) {
+func (s *Server) reap(channel ssh.Channel, cmd *exec.Cmd, ptyFile *os.File, stdinPipe *os.File, mu *sync.Mutex, u *user.User) {
 	var copyWG sync.WaitGroup
 	if ptyFile != nil {
 		copyWG.Add(1)
@@ -230,7 +231,13 @@ func (s *Server) reap(channel ssh.Channel, cmd *exec.Cmd, ptyFile *os.File, stdi
 	}
 	err := cmd.Wait()
 	if ptyFile != nil {
-		_ = ptyFile.Close()
+		if mu != nil {
+			mu.Lock()
+			_ = ptyFile.Close()
+			mu.Unlock()
+		} else {
+			_ = ptyFile.Close()
+		}
 	}
 	if stdinPipe != nil {
 		_ = stdinPipe.Close()
