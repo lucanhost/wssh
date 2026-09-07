@@ -60,6 +60,25 @@ var signalNames = map[syscall.Signal]string{
 	syscall.SIGTERM: "TERM",
 }
 
+func clampWinsize(rows, cols uint32) (uint16, uint16, bool) {
+	if rows == 0 || cols == 0 {
+		if rows == 0 {
+			rows = 24
+		}
+		if cols == 0 {
+			cols = 80
+		}
+		return uint16(rows), uint16(cols), true
+	}
+	if rows > 0xFFFF {
+		rows = 0xFFFF
+	}
+	if cols > 0xFFFF {
+		cols = 0xFFFF
+	}
+	return uint16(rows), uint16(cols), true
+}
+
 func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request, u *user.User, shell string) {
 	var (
 		cmd       *exec.Cmd
@@ -94,7 +113,12 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 			}
 			term = p.Term
 			havePTY = true
-			winSize = pty.Winsize{Rows: uint16(p.Rows), Cols: uint16(p.Columns)}
+			r, c, ok := clampWinsize(p.Rows, p.Columns)
+			if !ok {
+				req.Reply(false, nil)
+				continue
+			}
+			winSize = pty.Winsize{Rows: r, Cols: c}
 			mu.Lock()
 			if ptyFile != nil {
 				_ = pty.Setsize(ptyFile, &winSize)
@@ -108,7 +132,12 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 				req.Reply(false, nil)
 				continue
 			}
-			winSize = pty.Winsize{Rows: uint16(p.Rows), Cols: uint16(p.Columns)}
+			r, c, ok := clampWinsize(p.Rows, p.Columns)
+			if !ok {
+				req.Reply(false, nil)
+				continue
+			}
+			winSize = pty.Winsize{Rows: r, Cols: c}
 			mu.Lock()
 			if ptyFile != nil {
 				_ = pty.Setsize(ptyFile, &winSize)
@@ -175,9 +204,6 @@ func (s *Server) startProcess(u *user.User, shell string, term string, havePTY b
 	if havePTY {
 		attrs.Setsid = true
 		attrs.Setctty = true
-		if winSize.Rows == 0 && winSize.Cols == 0 {
-			winSize = pty.Winsize{Rows: 24, Cols: 80}
-		}
 		f, err := pty.StartWithAttrs(cmd, &winSize, attrs)
 		if err != nil {
 			return nil, nil, nil, err
