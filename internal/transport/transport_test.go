@@ -85,3 +85,50 @@ func TestDialSendsBinaryFrames(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 }
+
+func TestReadLimitRejectsOversizedMessage(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nc, err := Accept(w, r)
+		if err != nil {
+			t.Errorf("Accept: %v", err)
+			return
+		}
+		defer nc.Close()
+		buf := make([]byte, 4096)
+		for {
+			_, err := nc.Read(buf)
+			if err != nil {
+				return
+			}
+		}
+	}))
+	defer up.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(up.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	c, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		CompressionMode: websocket.CompressionDisabled,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.CloseNow()
+
+	largeMsg := make([]byte, 1<<20+1)
+	if err := c.Write(ctx, websocket.MessageBinary, largeMsg); err != nil {
+		t.Fatalf("write large msg: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	nc2, err := Dial(ctx, wsURL)
+	if err != nil {
+		t.Fatalf("second Dial: %v", err)
+	}
+	defer nc2.Close()
+	if _, err := nc2.Write([]byte("abc")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+}
