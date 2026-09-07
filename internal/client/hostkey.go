@@ -45,7 +45,7 @@ func HostKeyCallback(opts HostKeyOptions) ssh.HostKeyCallback {
 			return baseErr
 		}
 		if base != nil {
-			err := base(hostname, remote, key)
+			err := base(hostname, tcpAddr(hostname), key)
 			if err == nil {
 				return nil
 			}
@@ -75,6 +75,11 @@ func HostKeyCallback(opts HostKeyOptions) ssh.HostKeyCallback {
 		return appendKnownHost(opts.KnownHostsPath, hostname, key)
 	}
 }
+
+type tcpAddr string
+
+func (a tcpAddr) Network() string { return "tcp" }
+func (a tcpAddr) String() string  { return string(a) }
 
 func appendKnownHost(path, hostname string, key ssh.PublicKey) error {
 	entry := fmt.Sprintf("%s %s\n", hostname, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))))

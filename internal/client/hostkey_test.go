@@ -130,5 +130,21 @@ func TestHostKeyUnknownPromptEOF(t *testing.T) {
 	}
 }
 
+func TestHostKeyCallbackWithWebsocketRemoteAddr(t *testing.T) {
+	dir := t.TempDir()
+	_, key := testKey(t)
+	kh := writeKnownHosts(t, dir, []string{keyLine(t, "srv:8080", key)})
+	cb := HostKeyCallback(HostKeyOptions{KnownHostsPath: kh})
+	wsAddr := websocketMockAddr{}
+	if err := cb("srv:8080", wsAddr, key); err != nil {
+		t.Fatalf("known key rejected with websocket remote addr: %v", err)
+	}
+}
+
+type websocketMockAddr struct{}
+
+func (websocketMockAddr) Network() string { return "websocket" }
+func (websocketMockAddr) String() string  { return "websocket/unknown-addr" }
+
 var _ = net.SplitHostPort
 var _ = knownhosts.New
