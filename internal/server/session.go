@@ -15,11 +15,12 @@ import (
 )
 
 type ptyRequest struct {
-	Term    string
-	Columns uint32
-	Rows    uint32
-	Width   uint32
-	Height  uint32
+	Term     string
+	Columns  uint32
+	Rows     uint32
+	Width    uint32
+	Height   uint32
+	Modelist string
 }
 
 type windowChangeRequest struct {
@@ -60,18 +61,25 @@ var signalNames = map[syscall.Signal]string{
 
 func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request, u *user.User, shell string) {
 	var (
-		cmd     *exec.Cmd
-		ptyFile *os.File
-		term    string
-		havePTY bool
-		winSize pty.Winsize
+		cmd       *exec.Cmd
+		ptyFile   *os.File
+		stdinPipe *os.File
+		term      string
+		havePTY   bool
+		winSize   pty.Winsize
+		mu        sync.Mutex
 	)
 	defer func() {
 		if cmd != nil && cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
+		mu.Lock()
 		if ptyFile != nil {
 			_ = ptyFile.Close()
+		}
+		mu.Unlock()
+		if stdinPipe != nil {
+			_ = stdinPipe.Close()
 		}
 	}()
 
@@ -86,9 +94,11 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 			term = p.Term
 			havePTY = true
 			winSize = pty.Winsize{Rows: uint16(p.Rows), Cols: uint16(p.Columns)}
+			mu.Lock()
 			if ptyFile != nil {
 				_ = pty.Setsize(ptyFile, &winSize)
 			}
+			mu.Unlock()
 			req.Reply(true, nil)
 
 		case "window-change":
@@ -98,9 +108,11 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 				continue
 			}
 			winSize = pty.Winsize{Rows: uint16(p.Rows), Cols: uint16(p.Columns)}
+			mu.Lock()
 			if ptyFile != nil {
 				_ = pty.Setsize(ptyFile, &winSize)
 			}
+			mu.Unlock()
 			req.Reply(true, nil)
 
 		case "shell", "exec":
@@ -119,7 +131,7 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 				shellArgs = []string{"-c", p.Command}
 			}
 			var err error
-			cmd, ptyFile, err = s.startProcess(u, shell, term, havePTY, winSize, shellArgs, channel)
+			cmd, ptyFile, stdinPipe, err = s.startProcess(u, shell, term, havePTY, winSize, shellArgs, channel)
 			if err != nil {
 				s.logger.Error("process start failed", "user", u.Username, "type", kind, "err", err)
 				cmd = nil
@@ -128,7 +140,7 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 			}
 			req.Reply(true, nil)
 			s.logger.Info("session opened", "user", u.Username, "type", kind, "pty", havePTY)
-			go s.reap(channel, cmd, ptyFile, u)
+			go s.reap(channel, cmd, ptyFile, stdinPipe, u)
 
 		default:
 			req.Reply(false, nil)
@@ -136,7 +148,7 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 	}
 }
 
-func (s *Server) startProcess(u *user.User, shell string, term string, havePTY bool, winSize pty.Winsize, shellArgs []string, channel ssh.Channel) (*exec.Cmd, *os.File, error) {
+func (s *Server) startProcess(u *user.User, shell string, term string, havePTY bool, winSize pty.Winsize, shellArgs []string, channel ssh.Channel) (*exec.Cmd, *os.File, *os.File, error) {
 	if shell == "" {
 		shell = "/bin/sh"
 	}
@@ -161,17 +173,24 @@ func (s *Server) startProcess(u *user.User, shell string, term string, havePTY b
 		}
 		f, err := pty.StartWithAttrs(cmd, &winSize, attrs)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		return cmd, f, nil
+		return cmd, f, nil, nil
 	}
-	cmd.Stdin = channel
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	cmd.Stdin = pr
 	cmd.Stdout = channel
 	cmd.Stderr = channel.Stderr()
 	if err := cmd.Start(); err != nil {
-		return nil, nil, err
+		pw.Close()
+		pr.Close()
+		return nil, nil, nil, err
 	}
-	return cmd, nil, nil
+	go io.Copy(pw, channel)
+	return cmd, nil, pw, nil
 }
 
 func credentialsFor(u *user.User) *syscall.Credential {
@@ -199,7 +218,7 @@ func credentialsFor(u *user.User) *syscall.Credential {
 	return &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: groups}
 }
 
-func (s *Server) reap(channel ssh.Channel, cmd *exec.Cmd, ptyFile *os.File, u *user.User) {
+func (s *Server) reap(channel ssh.Channel, cmd *exec.Cmd, ptyFile *os.File, stdinPipe *os.File, u *user.User) {
 	var copyWG sync.WaitGroup
 	if ptyFile != nil {
 		copyWG.Add(1)
@@ -212,6 +231,9 @@ func (s *Server) reap(channel ssh.Channel, cmd *exec.Cmd, ptyFile *os.File, u *u
 	err := cmd.Wait()
 	if ptyFile != nil {
 		_ = ptyFile.Close()
+	}
+	if stdinPipe != nil {
+		_ = stdinPipe.Close()
 	}
 	copyWG.Wait()
 	status := uint32(0)
