@@ -76,7 +76,9 @@ func main() {
 		"mode", map[bool]string{true: "root", false: "non-root"}[srv.Root()],
 		"hostkey", *hostKey,
 	)
-	logger.Info("rate limiting keys on RemoteAddr; if fronted by a TLS proxy, enforce rate limits at the proxy")
+	if *rate > 0 {
+		logger.Info("rate limiting keys on RemoteAddr; if fronted by a TLS proxy, enforce rate limits at the proxy")
+	}
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- hs.Serve(ln) }()
