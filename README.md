@@ -12,5 +12,4 @@ SSH-over-WebSocket daemon and client in pure Go.
   subsystems (out of scope).
 - Public-key authentication only; password and keyboard-interactive auth are
   deliberately unsupported.
-- WebSocket message read limit is 1 MiB per frame; larger SSH packets are
-  dropped.
+- WebSocket message read limit is 1 MiB per frame; larger SSH packets cause the connection to close.
