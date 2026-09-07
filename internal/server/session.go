@@ -156,18 +156,8 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 				req.Reply(false, nil)
 				continue
 			}
-			if s.childrenSem != nil {
-				select {
-				case s.childrenSem <- struct{}{}:
-					semHeld = true
-				default:
-					s.logger.Warn("max children reached", "user", u.Username, "type", req.Type)
-					req.Reply(false, nil)
-					continue
-				}
-			}
-			var shellArgs []string
 			kind := req.Type
+			var shellArgs []string
 			if req.Type == "exec" {
 				var p execRequest
 				if err := ssh.Unmarshal(req.Payload, &p); err != nil {
@@ -176,21 +166,32 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 				}
 				shellArgs = []string{"-c", p.Command}
 			}
-			var err error
-			cmd, ptyFile, stdinPipe, err = s.startProcess(u, shell, term, havePTY, winSize, shellArgs, channel)
-			if err != nil {
-				s.logger.Error("process start failed", "user", u.Username, "type", kind, "err", err)
-				cmd = nil
-				req.Reply(false, nil)
-				continue
+			if s.childrenSem != nil {
+				select {
+				case s.childrenSem <- struct{}{}:
+					semHeld = true
+				default:
+					s.logger.Warn("max children reached", "user", u.Username, "type", kind)
+					req.Reply(false, nil)
+					continue
+				}
 			}
-			req.Reply(true, nil)
-			s.logger.Info("session opened", "user", u.Username, "type", kind, "pty", havePTY)
 			release := func() {
 				if semHeld && s.childrenSem != nil {
 					<-s.childrenSem
 				}
 			}
+			var err error
+			cmd, ptyFile, stdinPipe, err = s.startProcess(u, shell, term, havePTY, winSize, shellArgs, channel)
+			if err != nil {
+				s.logger.Error("process start failed", "user", u.Username, "type", kind, "err", err)
+				cmd = nil
+				release()
+				req.Reply(false, nil)
+				continue
+			}
+			req.Reply(true, nil)
+			s.logger.Info("session opened", "user", u.Username, "type", kind, "pty", havePTY)
 			go s.reap(channel, cmd, ptyFile, stdinPipe, &mu, u, release)
 
 		default:

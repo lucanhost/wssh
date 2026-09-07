@@ -281,3 +281,68 @@ func TestMaxChildrenSemReleased(t *testing.T) {
 	cl3.Close()
 	cl4.Close()
 }
+
+func TestMaxChildrenSemNotLeakedOnMalformedExec(t *testing.T) {
+	signer, line := testSigner(t)
+	akPath := filepath.Join(t.TempDir(), "authorized_keys")
+	os.WriteFile(akPath, []byte(line), 0o600)
+
+	s := New(Config{
+		Signer:             signer,
+		Logger:             discardLogger(),
+		AuthorizedKeysPath: func(*user.User) string { return akPath },
+		MaxChildren:        2,
+	})
+	mux := http.NewServeMux()
+	mux.Handle("/ws", s.WebSocketHandler())
+	up := httptest.NewServer(mux)
+	defer up.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(up.URL, "http") + "/ws"
+
+	cl1 := dialTestSSH(t, wsURL, currentUser(t), signer)
+	cl2 := dialTestSSH(t, wsURL, currentUser(t), signer)
+
+	s1, _ := cl1.NewSession()
+	s1.Start("sleep 60")
+	s2, _ := cl2.NewSession()
+	s2.Start("sleep 60")
+
+	s1.Close()
+	time.Sleep(300 * time.Millisecond)
+
+	cl3 := dialTestSSH(t, wsURL, currentUser(t), signer)
+	ch, _, err := cl3.OpenChannel("session", nil)
+	if err != nil {
+		t.Fatalf("open channel: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		ok, err := ch.SendRequest("exec", true, []byte{0x00})
+		if ok {
+			t.Fatal("expected false reply for malformed exec")
+		}
+		_ = err
+	}
+	ch.Close()
+	cl3.Close()
+
+	cl4 := dialTestSSH(t, wsURL, currentUser(t), signer)
+	s4, err := cl4.NewSession()
+	if err != nil {
+		t.Fatalf("valid session after malformed execs: %v", err)
+	}
+	defer s4.Close()
+	var out bytes.Buffer
+	s4.Stdout = &out
+	if err := s4.Run("echo ok"); err != nil {
+		t.Fatalf("valid exec failed: %v", err)
+	}
+	if out.String() != "ok\n" {
+		t.Fatalf("output = %q, want %q", out.String(), "ok\n")
+	}
+
+	s2.Close()
+	cl1.Close()
+	cl2.Close()
+	cl4.Close()
+}
