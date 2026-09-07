@@ -51,3 +51,27 @@ func TestWebSocketURL(t *testing.T) {
 		t.Fatalf("SSHAddr = %q", got)
 	}
 }
+
+func FuzzParseTarget(f *testing.F) {
+	for _, seed := range []string{
+		"alice@server",
+		"wss://bob@srv:8443/custom",
+		"user@host:8080",
+		"ws://",
+		"@host",
+		"user@",
+		"user@host:99999",
+		"user@host:0",
+		"user@host:-1",
+		"ftp://a@b",
+		"ws://user@[::1]:8080/ws",
+		"ws://user@host/%zz",
+		"ws://us%2Fer@host",
+		"",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		_, _ = ParseTarget(s)
+	})
+}
