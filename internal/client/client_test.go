@@ -95,8 +95,6 @@ func TestExitCodeMapping(t *testing.T) {
 	}
 }
 
-// TestConnectSurvivesDialTimeout proves NetConn is not anchored to the dial
-// context — a command run after connectTimeout has elapsed must still succeed.
 func TestConnectSurvivesDialTimeout(t *testing.T) {
 	cl := loopbackClient(t)
 	time.Sleep(1100 * time.Millisecond)

@@ -99,19 +99,26 @@ func RunShell(c *ssh.Client) error {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)
+	done := make(chan struct{})
+	defer close(done)
 	defer signal.Stop(sigCh)
 	go func() {
-		for sig := range sigCh {
-			switch sig {
-			case syscall.SIGWINCH:
-				w, h, err := term.GetSize(fd)
-				if err == nil {
-					_ = sess.WindowChange(h, w)
+		for {
+			select {
+			case <-done:
+				return
+			case sig := <-sigCh:
+				switch sig {
+				case syscall.SIGWINCH:
+					w, h, err := term.GetSize(fd)
+					if err == nil {
+						_ = sess.WindowChange(h, w)
+					}
+				default:
+					restore()
+					_ = sess.Close()
+					os.Exit(130)
 				}
-			default:
-				restore()
-				_ = sess.Close()
-				os.Exit(130)
 			}
 		}
 	}()
