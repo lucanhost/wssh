@@ -64,5 +64,3 @@ func TestWaitTimeoutReturnsFalseOnHungSession(t *testing.T) {
 	}
 	shortCl.Close()
 }
-
-
