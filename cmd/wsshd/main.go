@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"wssh/internal/config"
 	"wssh/internal/server"
 )
 
@@ -25,26 +26,54 @@ func main() {
 		key            = flag.String("key", "", "TLS private key file")
 		rate           = flag.Float64("rate", 1, "upgrade requests per second per IP (burst 5); 0 disables")
 		trustedProxies = flag.String("trusted-proxies", "", "comma-separated CIDRs/bare IPs trusted to send forwarding headers (X-Forwarded-For, X-Real-IP, CF-Connecting-IP)")
+		configPath     = flag.String("config", "", "TOML config file path")
 	)
 	flag.Parse()
-	var proxyList []string
-	for _, p := range strings.Split(*trustedProxies, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			proxyList = append(proxyList, p)
-		}
-	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	if (*cert == "") != (*key == "") {
-		logger.Error("-cert and -key must be given together")
+	var fileOverlay *config.Overlay
+	if *configPath != "" {
+		var err error
+		fileOverlay, err = config.Load(*configPath)
+		if err != nil {
+			logger.Error("config", "path", *configPath, "err", err)
+			os.Exit(1)
+		}
+	}
+
+	cliOverlay := &config.Overlay{}
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "addr":
+			cliOverlay.Addr = addr
+		case "path":
+			cliOverlay.Path = path
+		case "hostkey":
+			cliOverlay.HostKey = hostKey
+		case "cert":
+			cliOverlay.Cert = cert
+		case "key":
+			cliOverlay.Key = key
+		case "rate":
+			r := *rate
+			cliOverlay.Rate = &r
+		case "trusted-proxies":
+			cliOverlay.TrustedProxies = splitList(*trustedProxies)
+		}
+	})
+
+	resolved := config.Merge(config.Defaults(), fileOverlay, cliOverlay)
+	if err := resolved.Validate(); err != nil {
+		logger.Error(err.Error())
 		os.Exit(2)
 	}
-	wsPath := *path
+
+	wsPath := resolved.Path
 	if !strings.HasPrefix(wsPath, "/") {
 		wsPath = "/" + wsPath
 	}
 
-	signer, err := server.LoadOrGenerateHostKey(*hostKey)
+	signer, err := server.LoadOrGenerateHostKey(resolved.HostKey)
 	if err != nil {
 		logger.Error("host key", "err", err)
 		os.Exit(1)
@@ -52,24 +81,24 @@ func main() {
 	srv := server.New(server.Config{
 		Signer:         signer,
 		Logger:         logger,
-		Rate:           *rate,
+		Rate:           resolved.Rate,
 		Burst:          5,
-		TrustedProxies: proxyList,
+		TrustedProxies: resolved.TrustedProxies,
 	})
 	defer srv.Close()
 
 	mux := http.NewServeMux()
 	mux.Handle(wsPath, srv.WebSocketHandler())
-	hs := &http.Server{Addr: *addr, Handler: mux}
+	hs := &http.Server{Addr: resolved.Addr, Handler: mux}
 
-	ln, err := net.Listen("tcp", *addr)
+	ln, err := net.Listen("tcp", resolved.Addr)
 	if err != nil {
 		logger.Error("listen", "err", err)
 		os.Exit(1)
 	}
 	tlsMode := "plain"
-	if *cert != "" {
-		certPair, err := tls.LoadX509KeyPair(*cert, *key)
+	if resolved.Cert != "" {
+		certPair, err := tls.LoadX509KeyPair(resolved.Cert, resolved.Key)
 		if err != nil {
 			logger.Error("tls", "err", err)
 			os.Exit(1)
@@ -80,13 +109,16 @@ func main() {
 	}
 
 	logger.Info("wsshd listening",
-		"addr", *addr, "path", wsPath, "tls", tlsMode,
+		"addr", resolved.Addr, "path", wsPath, "tls", tlsMode,
 		"mode", map[bool]string{true: "root", false: "non-root"}[srv.Root()],
-		"hostkey", *hostKey,
+		"hostkey", resolved.HostKey,
 	)
-	if len(proxyList) > 0 {
-		logger.Info("trusting client IP from forwarding headers; trusted proxies: " + strings.Join(proxyList, ","))
-	} else if *rate > 0 {
+	if *configPath != "" {
+		logger.Info("using config file", "path", *configPath)
+	}
+	if len(resolved.TrustedProxies) > 0 {
+		logger.Info("trusting client IP from forwarding headers; trusted proxies: " + strings.Join(resolved.TrustedProxies, ","))
+	} else if resolved.Rate > 0 {
 		logger.Info("rate limiting keys on RemoteAddr; if fronted by a TLS proxy, enforce rate limits at the proxy")
 	}
 
@@ -106,4 +138,14 @@ func main() {
 	const shutdownTimeout = 30 * time.Second
 	srv.WaitTimeout(shutdownTimeout)
 	logger.Info("wsshd stopped")
+}
+
+func splitList(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

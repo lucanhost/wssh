@@ -15,3 +15,25 @@ SSH-over-WebSocket daemon and client in pure Go.
 - Public-key authentication only; password and keyboard-interactive auth are
   deliberately unsupported.
 - WebSocket message read limit is 1 MiB per frame; larger SSH packets cause the connection to close.
+
+## Configuration (wsshd)
+
+`wsshd` reads an optional TOML config file via `-config PATH`. Precedence:
+explicit CLI flag > config file > built-in default. Omitting `-config` keeps
+pure flag behavior. A missing or malformed file passed via `-config` is a fatal
+startup error.
+
+\`\`\`toml
+# /etc/wssh/wsshd.toml
+addr    = ":8080"
+path    = "/ws"
+hostkey = "/etc/wssh/host_key"
+# cert  = "/etc/wssh/cert.pem"
+# key   = "/etc/wssh/key.pem"
+rate    = 1.0
+# trusted_proxies = ["10.0.0.0/8"]
+\`\`\`
+
+- `rate = 0` disables rate limiting (it is NOT treated as "unset").
+- `cert` and `key` must be set together, whether via file or flags.
+
