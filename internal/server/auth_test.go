@@ -170,12 +170,12 @@ func fuzzKeyLine() (ssh.Signer, string) {
 	return signer, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
 }
 
-func TestCheckStrictModes(t *testing.T) {
+func TestOpenVerifiedAuthorizedKeys(t *testing.T) {
 	me, err := user.Current()
 	if err != nil {
 		t.Skipf("user.Current: %v", err)
 	}
-	home := t.TempDir() // 0700, owned by current user
+	home := t.TempDir()
 	sshDir := filepath.Join(home, ".ssh")
 	if err := os.Mkdir(sshDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -197,7 +197,7 @@ func TestCheckStrictModes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := os.WriteFile(keyPath, []byte("ssh-ed25519 AAAA test\n"), tc.fileMode); err != nil {
+			if err := os.WriteFile(keyPath, []byte("ssh-ed25519 AAAA test\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Chmod(keyPath, tc.fileMode); err != nil {
@@ -207,18 +207,59 @@ func TestCheckStrictModes(t *testing.T) {
 				t.Fatal(err)
 			}
 			u := &user.User{Uid: me.Uid, Gid: me.Gid, Username: me.Username, HomeDir: home}
-			err := checkStrictModes(u, keyPath)
-			if tc.wantErr && err == nil {
-				t.Fatal("checkStrictModes accepted insecure permissions")
+			f, err := openVerifiedAuthorizedKeys(keyPath, u)
+			if tc.wantErr {
+				if err == nil {
+					f.Close()
+					t.Fatal("openVerifiedAuthorizedKeys accepted insecure permissions")
+				}
+				return
 			}
-			if !tc.wantErr && err != nil {
-				t.Fatalf("checkStrictModes rejected secure permissions: %v", err)
+			if err != nil {
+				t.Fatalf("openVerifiedAuthorizedKeys rejected secure permissions: %v", err)
 			}
+			f.Close()
 		})
 	}
 }
 
-func TestCheckStrictModesGroupWritableHome(t *testing.T) {
+func TestOpenVerifiedAuthorizedKeysCleanFile(t *testing.T) {
+	me, err := user.Current()
+	if err != nil {
+		t.Skipf("user.Current: %v", err)
+	}
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.Mkdir(sshDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(sshDir, "authorized_keys")
+	if err := os.WriteFile(keyPath, []byte("ssh-ed25519 AAAA clean\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u := &user.User{Uid: me.Uid, Gid: me.Gid, Username: me.Username, HomeDir: home}
+	f, err := openVerifiedAuthorizedKeys(keyPath, u)
+	if err != nil {
+		t.Fatalf("clean file rejected: %v", err)
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		t.Fatalf("fstat on returned fd: %v", err)
+	}
+	if !fi.Mode().IsRegular() {
+		t.Fatalf("opened file not regular: %v", fi.Mode())
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("read verified fd: %v", err)
+	}
+	if string(data) != "ssh-ed25519 AAAA clean\n" {
+		t.Fatalf("verified fd content = %q", data)
+	}
+}
+
+func TestOpenVerifiedAuthorizedKeysGroupWritableHome(t *testing.T) {
 	me, err := user.Current()
 	if err != nil {
 		t.Skipf("user.Current: %v", err)
@@ -236,12 +277,77 @@ func TestCheckStrictModesGroupWritableHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := &user.User{Uid: me.Uid, Gid: me.Gid, Username: me.Username, HomeDir: home}
-	if err := checkStrictModes(u, keyPath); err == nil {
+	if f, err := openVerifiedAuthorizedKeys(keyPath, u); err == nil {
+		f.Close()
 		t.Fatal("group-writable home accepted")
 	}
 }
 
-func TestCheckStrictModesOwnership(t *testing.T) {
+func TestOpenVerifiedAuthorizedKeysUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root opens files regardless of mode")
+	}
+	me, err := user.Current()
+	if err != nil {
+		t.Skipf("user.Current: %v", err)
+	}
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.Mkdir(sshDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(sshDir, "authorized_keys")
+	if err := os.WriteFile(keyPath, []byte("ssh-ed25519 AAAA test\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	u := &user.User{Uid: me.Uid, Gid: me.Gid, Username: me.Username, HomeDir: home}
+	if f, err := openVerifiedAuthorizedKeys(keyPath, u); err == nil {
+		f.Close()
+		t.Fatal("unreadable file accepted")
+	}
+}
+
+func TestOpenVerifiedAuthorizedKeysMissing(t *testing.T) {
+	me, err := user.Current()
+	if err != nil {
+		t.Skipf("user.Current: %v", err)
+	}
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.Mkdir(sshDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(sshDir, "authorized_keys")
+	u := &user.User{Uid: me.Uid, Gid: me.Gid, Username: me.Username, HomeDir: home}
+	if f, err := openVerifiedAuthorizedKeys(keyPath, u); err == nil {
+		f.Close()
+		t.Fatal("missing file accepted")
+	}
+}
+
+func TestOpenVerifiedAuthorizedKeysBadUser(t *testing.T) {
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.Mkdir(sshDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(sshDir, "authorized_keys")
+	if err := os.WriteFile(keyPath, []byte("ssh-ed25519 AAAA test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	noHome := &user.User{Uid: "1000", Gid: "1000", Username: "x", HomeDir: ""}
+	if f, err := openVerifiedAuthorizedKeys(keyPath, noHome); err == nil {
+		f.Close()
+		t.Fatal("empty home accepted")
+	}
+	badUID := &user.User{Uid: "notanumber", Gid: "1000", Username: "x", HomeDir: home}
+	if f, err := openVerifiedAuthorizedKeys(keyPath, badUID); err == nil {
+		f.Close()
+		t.Fatal("invalid uid accepted")
+	}
+}
+
+func TestOpenVerifiedAuthorizedKeysOwnership(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("ownership checks require root")
 	}
@@ -263,14 +369,17 @@ func TestCheckStrictModesOwnership(t *testing.T) {
 	if err := os.Chown(keyPath, 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkStrictModes(u, keyPath); err != nil {
+	f, err := openVerifiedAuthorizedKeys(keyPath, u)
+	if err != nil {
 		t.Fatalf("root-owned key rejected: %v", err)
 	}
+	f.Close()
 
 	if err := os.Chown(keyPath, 65534, 65534); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkStrictModes(u, keyPath); err == nil {
+	if f, err := openVerifiedAuthorizedKeys(keyPath, u); err == nil {
+		f.Close()
 		t.Fatal("foreign-owned key accepted")
 	}
 }
