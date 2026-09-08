@@ -414,3 +414,17 @@ git commit -m "docs: document -version flag in README"
 - [ ] **README flag tables:** both tables get a `-version` row; Quick Start shows version checking — Task 4.
 - [ ] **No behavior change beyond version flag:** no other logic touched; full `go test ./... -race -count=1` gates every task.
 - [ ] **Placeholder scan:** all steps contain exact content; no TBD/TODO.
+---
+
+## Amendment (2026-09-08, user-approved during execution)
+
+### Task 5: Fix darwin build failure — gate SIGPWR behind linux build tag
+
+Discovered during Task 3 verification (pre-existing on main): `internal/server/session.go:76` uses `syscall.SIGPWR` (Linux-only), so `GOOS=darwin go build ./...` fails and the release workflow's darwin/amd64 + darwin/arm64 targets would fail at tag time. User chose "fix in this batch".
+
+- Modify: `internal/server/session.go` (remove SIGPWR from `signalNames` map literal)
+- Create: `internal/server/signalnames_linux.go` (`//go:build linux`, init() registers `signalNames[syscall.SIGPWR] = "PWR"`)
+- Modify: `internal/server/session_test.go` (remove SIGPWR from table test)
+- Create: `internal/server/signalnames_linux_test.go` (linux-only test asserting `"PWR"`)
+
+Verification: `GOOS=linux GOARCH=amd64 go build ./...`; `GOOS=darwin GOARCH=amd64 go build ./...`; `GOOS=darwin GOARCH=arm64 go build ./...`; `go test ./... -race -count=1`; `GOOS=darwin GOARCH=arm64 go vet ./internal/server/`. Commit: `fix: gate SIGPWR signal name behind linux build tag`.
