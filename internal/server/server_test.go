@@ -413,6 +413,7 @@ func TestServeConnHandshakeDeadline(t *testing.T) {
 	t.Cleanup(func() { handshakeTimeout = old })
 
 	sc := &stallConn{closed: make(chan struct{})}
+	s.handshakeSem <- struct{}{}
 	s.wg.Add(1)
 	done := make(chan struct{})
 	go func() {
@@ -454,6 +455,7 @@ func TestServeConnClearsDeadlineAfterHandshake(t *testing.T) {
 		}
 		rc := &recordingConn{Conn: sc}
 		rcCh <- rc // channel send happens-before the main goroutine's receive
+		s.handshakeSem <- struct{}{}
 		s.wg.Add(1)
 		s.serveConn(rc, ln.Addr().String())
 	}()
@@ -502,4 +504,134 @@ func TestServeConnClearsDeadlineAfterHandshake(t *testing.T) {
 	if !ok {
 		t.Fatal("deadline not cleared after successful handshake")
 	}
+}
+
+func TestMaxHandshakesDefault(t *testing.T) {
+	signer, _ := testSigner(t)
+	s := New(Config{Signer: signer})
+	if cap(s.handshakeSem) != 64 {
+		t.Fatalf("default MaxHandshakes = %d, want 64", cap(s.handshakeSem))
+	}
+	s2 := New(Config{Signer: signer, MaxHandshakes: 2})
+	if cap(s2.handshakeSem) != 2 {
+		t.Fatalf("MaxHandshakes = %d, want 2", cap(s2.handshakeSem))
+	}
+}
+
+func newMaxHandshakesServer(t *testing.T, maxHandshakes int) (*Server, string, string, ssh.Signer) {
+	t.Helper()
+	signer, line := testSigner(t)
+	akPath := filepath.Join(t.TempDir(), "authorized_keys")
+	if err := os.WriteFile(akPath, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Config{
+		Signer:             signer,
+		Logger:             discardLogger(),
+		AuthorizedKeysPath: func(*user.User) string { return akPath },
+		MaxHandshakes:      maxHandshakes,
+	})
+	t.Cleanup(s.Close)
+	mux := http.NewServeMux()
+	mux.Handle("/ws", s.WebSocketHandler())
+	up := httptest.NewServer(mux)
+	t.Cleanup(up.Close)
+	wsURL := "ws" + strings.TrimPrefix(up.URL, "http") + "/ws"
+	httpURL := "http" + strings.TrimPrefix(up.URL, "http") + "/ws"
+	return s, wsURL, httpURL, signer
+}
+
+func TestMaxHandshakesSemRejectsAtCapacity(t *testing.T) {
+	_, wsURL, httpURL, signer := newMaxHandshakesServer(t, 1)
+
+	held, err := transport.Dial(context.Background(), wsURL)
+	if err != nil {
+		t.Fatalf("first dial: %v", err)
+	}
+	defer held.Close()
+
+	resp, err := http.Get(httpURL)
+	if err != nil {
+		t.Fatalf("probe get: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("probe status = %d, want 503 while handshake in flight", resp.StatusCode)
+	}
+
+	held.Close()
+	var recovered *ssh.Client
+	for i := 0; i < 50; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		netConn, err := transport.Dial(ctx, wsURL)
+		if err != nil {
+			cancel()
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		cfg := &ssh.ClientConfig{
+			User:            currentUser(t),
+			Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			Timeout:         2 * time.Second,
+		}
+		conn, chans, reqs, err := ssh.NewClientConn(netConn, "test:1", cfg)
+		cancel()
+		if err != nil {
+			netConn.Close()
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		recovered = ssh.NewClient(conn, chans, reqs)
+		break
+	}
+	if recovered == nil {
+		t.Fatal("handshake slot not released after stalled handshake closed")
+	}
+	defer recovered.Close()
+	sess, err := recovered.NewSession()
+	if err != nil {
+		t.Fatalf("session after recovery: %v", err)
+	}
+	defer sess.Close()
+	var out bytes.Buffer
+	sess.Stdout = &out
+	if err := sess.Run("echo recovered"); err != nil {
+		t.Fatalf("run after recovery: %v", err)
+	}
+	if out.String() != "recovered\n" {
+		t.Fatalf("output = %q, want %q", out.String(), "recovered\n")
+	}
+}
+
+func TestMaxHandshakesSemReleasedAfterHandshake(t *testing.T) {
+	_, wsURL, _, signer := newMaxHandshakesServer(t, 1)
+
+	cl1 := dialTestSSH(t, wsURL, currentUser(t), signer)
+	sess1, err := cl1.NewSession()
+	if err != nil {
+		t.Fatalf("session 1: %v", err)
+	}
+	if err := sess1.Start("sleep 60"); err != nil {
+		t.Fatalf("start long-lived session: %v", err)
+	}
+
+	cl2 := dialTestSSH(t, wsURL, currentUser(t), signer)
+	sess2, err := cl2.NewSession()
+	if err != nil {
+		t.Fatalf("session 2: %v", err)
+	}
+	defer sess2.Close()
+	var out bytes.Buffer
+	sess2.Stdout = &out
+	if err := sess2.Run("echo while-alive"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out.String() != "while-alive\n" {
+		t.Fatalf("output = %q, want %q", out.String(), "while-alive\n")
+	}
+
+	sess1.Close()
+	cl1.Close()
+	cl2.Close()
 }

@@ -24,6 +24,7 @@ type Config struct {
 	AuthorizedKeysPath func(*user.User) string
 	MaxSessionsPerConn int
 	MaxChildren        int
+	MaxHandshakes      int
 	TrustedProxies     []string
 }
 
@@ -38,6 +39,7 @@ type Server struct {
 	wg                 sync.WaitGroup
 	maxSessionsPerConn int
 	childrenSem        chan struct{}
+	handshakeSem       chan struct{}
 }
 
 func New(cfg Config) *Server {
@@ -53,6 +55,9 @@ func New(cfg Config) *Server {
 	if cfg.MaxChildren == 0 {
 		cfg.MaxChildren = 256
 	}
+	if cfg.MaxHandshakes == 0 {
+		cfg.MaxHandshakes = 64
+	}
 	s := &Server{
 		logger:             cfg.Logger,
 		root:               os.Geteuid() == 0,
@@ -60,6 +65,7 @@ func New(cfg Config) *Server {
 		authorizedKeysPath: cfg.AuthorizedKeysPath,
 		maxSessionsPerConn: cfg.MaxSessionsPerConn,
 		childrenSem:        make(chan struct{}, cfg.MaxChildren),
+		handshakeSem:       make(chan struct{}, cfg.MaxHandshakes),
 	}
 	for _, entry := range cfg.TrustedProxies {
 		entry = strings.TrimSpace(entry)
@@ -114,8 +120,15 @@ func (s *Server) WebSocketHandler() http.Handler {
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
 		}
+		select {
+		case s.handshakeSem <- struct{}{}:
+		default:
+			http.Error(w, "too many concurrent handshakes", http.StatusServiceUnavailable)
+			return
+		}
 		netConn, err := transport.Accept(w, r)
 		if err != nil {
+			<-s.handshakeSem
 			s.logger.Warn("websocket upgrade failed", "remote", r.RemoteAddr, "err", err)
 			return
 		}
@@ -131,6 +144,7 @@ func (s *Server) serveConn(netConn net.Conn, remoteAddr string) {
 		s.logger.Warn("ssh handshake deadline not set", "remote", remoteAddr, "err", err)
 	}
 	sconn, chans, reqs, err := ssh.NewServerConn(netConn, &s.sshConfig)
+	<-s.handshakeSem
 	if err != nil {
 		s.logger.Warn("ssh handshake failed", "remote", remoteAddr, "err", err)
 		return
