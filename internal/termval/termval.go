@@ -1,3 +1,8 @@
+// Package termval validates terminal type (TERM) values.
+//
+// Both wsshd and wssh use it to sanitize the TERM string exchanged in SSH
+// pty-req requests before placing it in a child process environment or
+// sending it in a pty request, falling back to "xterm-256color" when invalid.
 package termval
 
 func Valid(s string) bool {

@@ -1,3 +1,30 @@
+// Command wsshd is an SSH-over-WebSocket daemon.
+//
+// It serves a complete SSH server (golang.org/x/crypto/ssh) over WebSocket
+// binary frames, allowing SSH clients to connect through firewalls that block
+// port 22 but allow HTTP/HTTPS (80/443).
+//
+// # Authentication
+//
+// wsshd supports public-key authentication only. It reads authorized keys from
+// ~/.ssh/authorized_keys for the target OS user.
+//
+// # Privilege Model
+//
+//   - Root mode (geteuid() == 0): accepts connections for any OS user and
+//     drops privileges to that user before spawning a shell.
+//   - Non-root mode: accepts connections only for the current OS user.
+//
+// # Configuration
+//
+// Configuration is via CLI flags or an optional TOML config file (-config).
+// Precedence: explicit CLI flag > config file > built-in default.
+//
+// # Example
+//
+//	wsshd -addr :8080 -hostkey /etc/wssh/host_key
+//	wsshd -addr :443 -cert cert.pem -key key.pem
+//	wsshd -config /etc/wssh/wsshd.toml
 package main
 
 import (

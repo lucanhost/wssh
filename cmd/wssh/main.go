@@ -1,3 +1,26 @@
+// Command wssh is an SSH-over-WebSocket client.
+//
+// It connects to a wsshd server via WebSocket and provides either an
+// interactive shell or one-shot command execution.
+//
+// # Usage
+//
+//	wssh [flags] [ws://|wss://]user@host[:port][/path] [command...]
+//
+// If command is present, runs in exec mode (one-shot). Otherwise, opens an
+// interactive shell with raw terminal mode and SIGWINCH resize support.
+//
+// # Host Key Verification
+//
+// By default, wssh verifies host keys against ~/.ssh/known_hosts and fails
+// closed on changed keys (MITM detection). Use --accept-new-host-key to
+// trust unknown hosts on first use.
+//
+// # Example
+//
+//	wssh user@example.com
+//	wssh user@example.com -- ls -la
+//	wssh wss://user@example.com:443/ws -- ping -c3 8.8.8.8
 package main
 
 import (

@@ -1,3 +1,21 @@
+// Package transport provides WebSocket-to-net.Conn bridging for SSH over
+// WebSocket.
+//
+// The core mechanism wraps a WebSocket connection into a net.Conn interface,
+// allowing golang.org/x/crypto/ssh to run unmodified over WebSocket binary
+// frames.
+//
+// # Binary Frames
+//
+// All WebSocket messages use websocket.MessageBinary. Text frames would
+// corrupt the SSH protocol stream.
+//
+// # Keepalive
+//
+// Both Accept and Dial start a background goroutine that sends WebSocket
+// ping frames every 15 seconds (5 second timeout). This survives idle-killing
+// proxies and firewalls. The goroutine exits on ping failure or connection
+// close.
 package transport
 
 import (

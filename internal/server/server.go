@@ -1,3 +1,29 @@
+// Package server implements an SSH-over-WebSocket daemon.
+//
+// It accepts WebSocket upgrades, wraps them into net.Conn, and runs a full
+// SSH server (golang.org/x/crypto/ssh) over the WebSocket binary stream.
+//
+// # Authentication
+//
+// Public-key authentication only. The PublicKeyCallback reads
+// ~/.ssh/authorized_keys for the target OS user and matches against the
+// presented key.
+//
+// # Sessions
+//
+// Each authenticated connection can open multiple session channels. Each
+// channel supports pty-req, window-change, shell, and exec requests.
+// PTY sessions spawn with Setsid+Setctty to create a controlling terminal.
+//
+// # Privilege Drop
+//
+// In root mode (geteuid() == 0), sessions drop privileges to the
+// authenticated user's UID/GID via syscall.Credential before spawning the
+// shell. Non-root mode can only serve the current user.
+//
+// # Graceful Shutdown
+//
+// Wait blocks until all active sessions close. WaitTimeout adds a deadline.
 package server
 
 import (

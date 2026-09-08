@@ -1,3 +1,22 @@
+// Package client implements an SSH-over-WebSocket client.
+//
+// It dials a WebSocket URL, establishes an SSH connection over it, and
+// provides either an interactive shell or one-shot command execution.
+//
+// # Target Parsing
+//
+// Targets use the format [ws://|wss://]user@host[:port][/path].
+//
+// # Host Key Verification
+//
+// The HostKeyCallback wraps golang.org/x/crypto/ssh/knownhosts and adds
+// trust-on-first-use (TOFU) support with interactive prompts.
+//
+// # Modes
+//
+//   - Interactive shell (RunShell): raw terminal mode, SIGWINCH resize,
+//     exit code 130 on Ctrl+C.
+//   - Exec (RunCommand): one-shot command, exit code from remote exit-status.
 package client
 
 import (

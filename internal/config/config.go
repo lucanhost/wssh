@@ -1,3 +1,10 @@
+// Package config implements wsshd configuration loading and merging.
+//
+// Configuration starts from Defaults, is overlaid by an optional TOML file
+// (Load), and then by explicitly set CLI flags, producing a final Config via
+// Merge. Overlay uses pointer fields so "unset" is distinguishable from a
+// zero value: rate = 0 in the TOML file disables rate limiting rather than
+// falling back to the default.
 package config
 
 import (
