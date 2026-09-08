@@ -195,7 +195,6 @@ func TestSignalNamesCoversStandardSignals(t *testing.T) {
 		syscall.SIGPROF:   "PROF",
 		syscall.SIGWINCH:  "WINCH",
 		syscall.SIGIO:     "IO",
-		syscall.SIGPWR:    "PWR",
 		syscall.SIGSYS:    "SYS",
 	}
 	for sig, want := range standard {

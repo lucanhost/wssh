@@ -73,7 +73,6 @@ var signalNames = map[syscall.Signal]string{
 	syscall.SIGPROF:   "PROF",
 	syscall.SIGWINCH:  "WINCH",
 	syscall.SIGIO:     "IO",
-	syscall.SIGPWR:    "PWR",
 	syscall.SIGSYS:    "SYS",
 }
 
