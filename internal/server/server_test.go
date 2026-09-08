@@ -386,9 +386,14 @@ func (c *stallConn) Close() error {
 	return nil
 }
 
-func (c *stallConn) LocalAddr() net.Addr                { return dummyAddr{} }
-func (c *stallConn) RemoteAddr() net.Addr               { return dummyAddr{} }
-func (c *stallConn) SetDeadline(t time.Time) error      { c.mu.Lock(); c.deadline = t; c.mu.Unlock(); return nil }
+func (c *stallConn) LocalAddr() net.Addr  { return dummyAddr{} }
+func (c *stallConn) RemoteAddr() net.Addr { return dummyAddr{} }
+func (c *stallConn) SetDeadline(t time.Time) error {
+	c.mu.Lock()
+	c.deadline = t
+	c.mu.Unlock()
+	return nil
+}
 func (c *stallConn) SetReadDeadline(t time.Time) error  { return c.SetDeadline(t) }
 func (c *stallConn) SetWriteDeadline(t time.Time) error { return c.SetDeadline(t) }
 
@@ -406,9 +411,9 @@ func (c *recordingConn) SetDeadline(t time.Time) error {
 	return c.Conn.SetDeadline(t)
 }
 
-	// Rewrites the package-level handshakeTimeout (restored via t.Cleanup); must
-	// not run under t.Parallel, which would race other tests' handshakes.
-	func TestServeConnHandshakeDeadline(t *testing.T) {
+// Rewrites the package-level handshakeTimeout (restored via t.Cleanup); must
+// not run under t.Parallel, which would race other tests' handshakes.
+func TestServeConnHandshakeDeadline(t *testing.T) {
 	s := newAuthServer(t, "")
 	old := handshakeTimeout
 	handshakeTimeout = 50 * time.Millisecond
