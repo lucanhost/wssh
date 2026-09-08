@@ -22,7 +22,7 @@ jobs:
       - name: Build binaries
         run: |
           VERSION=${GITHUB_REF_NAME}
-          LDFLAGS="-s -w -X main.version=${VERSION}"
+          LDFLAGS="-s -w"
           PLATFORMS=(
             "linux/amd64"
             "linux/arm64"
@@ -35,8 +35,8 @@ jobs:
             GOARCH="${platform#*/}"
             for bin in wsshd wssh; do
               output="dist/${bin}-${VERSION}-${GOOS}-${GOARCH}"
-              CGO_ENABLED=0 go build -trimpath -buildvcs=true \
-                -ldflags="${LDFLAGS}" -o "${output}" "./cmd/${bin}"
+              GOOS="${GOOS}" GOARCH="${GOARCH}" CGO_ENABLED=0 go build -trimpath \
+                -buildvcs=true -ldflags="${LDFLAGS}" -o "${output}" "./cmd/${bin}"
             done
           done
 
