@@ -15,26 +15,49 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// Overlay is a partially-specified configuration: unset fields are left
+// untouched by Merge. Pointer fields make zero values distinguishable from
+// absence — for example, rate = 0 in the TOML file disables rate limiting
+// rather than restoring the default.
 type Overlay struct {
-	Addr           *string  `toml:"addr"`
-	Path           *string  `toml:"path"`
-	HostKey        *string  `toml:"hostkey"`
-	Cert           *string  `toml:"cert"`
-	Key            *string  `toml:"key"`
-	Rate           *float64 `toml:"rate"`
+	// Addr overrides the HTTP listen address.
+	Addr *string `toml:"addr"`
+	// Path overrides the WebSocket endpoint path.
+	Path *string `toml:"path"`
+	// HostKey overrides the SSH host key file path.
+	HostKey *string `toml:"hostkey"`
+	// Cert overrides the TLS certificate file.
+	Cert *string `toml:"cert"`
+	// Key overrides the TLS private key file.
+	Key *string `toml:"key"`
+	// Rate overrides the per-IP upgrade rate; 0 disables rate limiting.
+	Rate *float64 `toml:"rate"`
+	// TrustedProxies overrides the trusted proxy CIDR list; nil leaves the
+	// previous value in place.
 	TrustedProxies []string `toml:"trusted_proxies"`
 }
 
+// Config is the fully-resolved daemon configuration.
 type Config struct {
-	Addr           string
-	Path           string
-	HostKey        string
-	Cert           string
-	Key            string
-	Rate           float64
+	// Addr is the HTTP listen address.
+	Addr string
+	// Path is the WebSocket endpoint path.
+	Path string
+	// HostKey is the SSH host key file path.
+	HostKey string
+	// Cert is the TLS certificate file; empty disables TLS.
+	Cert string
+	// Key is the TLS private key file; empty disables TLS.
+	Key string
+	// Rate is the per-IP WebSocket upgrade rate; 0 disables rate limiting.
+	Rate float64
+	// TrustedProxies lists CIDRs (or bare IPs) trusted to send client-IP
+	// forwarding headers.
 	TrustedProxies []string
 }
 
+// Defaults returns the built-in configuration: addr ":8080", path "/ws",
+// host key "/etc/wssh/host_key", rate 1, TLS disabled, no trusted proxies.
 func Defaults() Config {
 	return Config{
 		Addr:    ":8080",
@@ -44,6 +67,8 @@ func Defaults() Config {
 	}
 }
 
+// Load reads and parses the TOML config file at path. A missing or
+// malformed file is an error.
 func Load(path string) (*Overlay, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -59,6 +84,9 @@ func Load(path string) (*Overlay, error) {
 	return &o, nil
 }
 
+// Merge layers overlays over base in order: each overlay's set fields
+// replace the accumulated value and unset fields are skipped. Nil overlays
+// are ignored.
 func Merge(base Config, overlays ...*Overlay) Config {
 	c := base
 	for _, o := range overlays {
@@ -90,6 +118,8 @@ func Merge(base Config, overlays ...*Overlay) Config {
 	return c
 }
 
+// Validate reports whether the configuration is self-consistent: cert and
+// key must be provided together.
 func (c Config) Validate() error {
 	if (c.Cert == "") != (c.Key == "") {
 		return errors.New("-cert and -key must be given together")

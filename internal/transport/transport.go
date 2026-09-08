@@ -33,6 +33,11 @@ const (
 	keepaliveTimeout  = 5 * time.Second
 )
 
+// Accept upgrades the HTTP request to a WebSocket connection and returns it
+// wrapped in a net.Conn suitable for serving SSH over. Messages are
+// exchanged as binary frames only, frames larger than 1 MiB are rejected,
+// and a keepalive goroutine pings the peer every 15 seconds; closing the
+// returned conn stops the keepalive. WebSocket compression is disabled.
 func Accept(w http.ResponseWriter, r *http.Request) (net.Conn, error) {
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionDisabled,
@@ -47,6 +52,12 @@ func Accept(w http.ResponseWriter, r *http.Request) (net.Conn, error) {
 	return &connWithDone{Conn: nc, done: done}, nil
 }
 
+// Dial connects to the WebSocket endpoint at rawURL and returns the
+// connection wrapped in a net.Conn suitable for driving SSH over. Messages
+// are exchanged as binary frames only, frames larger than 1 MiB are
+// rejected, and a keepalive goroutine pings the peer every 15 seconds;
+// closing the returned conn stops the keepalive. WebSocket compression is
+// disabled.
 func Dial(ctx context.Context, rawURL string) (net.Conn, error) {
 	c, _, err := websocket.Dial(ctx, rawURL, &websocket.DialOptions{
 		CompressionMode: websocket.CompressionDisabled,

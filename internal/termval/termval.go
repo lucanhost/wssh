@@ -5,6 +5,9 @@
 // sending it in a pty request, falling back to "xterm-256color" when invalid.
 package termval
 
+// Valid reports whether s is an acceptable TERM value: 1-64 characters from
+// [A-Za-z0-9._-]. Callers fall back to "xterm-256color" when it returns
+// false.
 func Valid(s string) bool {
 	if len(s) < 1 || len(s) > 64 {
 		return false

@@ -12,6 +12,11 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// LoadOrGenerateHostKey returns an ssh.Signer for the private key at path.
+// When the file does not exist, a new ed25519 key is generated and written
+// as PEM with mode 0600 (parent directories created with mode 0755). An
+// existing file that cannot be read or parsed is an error; it is never
+// silently replaced.
 func LoadOrGenerateHostKey(path string) (ssh.Signer, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {

@@ -11,6 +11,12 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// LoadSigners parses the private keys at paths for SSH authentication.
+// When paths is empty it falls back to ~/.ssh/id_ed25519 and ~/.ssh/id_rsa;
+// missing default keys are skipped silently, while unreadable or
+// unparseable keys (default or explicit) are skipped with a warning written
+// to warn. Paths beginning with ~/ expand to the home directory. An error
+// is returned when no usable key remains.
 func LoadSigners(paths []string, warn io.Writer) ([]ssh.Signer, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

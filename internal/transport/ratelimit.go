@@ -16,6 +16,14 @@ type rlEntry struct {
 	lastSeen time.Time
 }
 
+// RateLimiter is a per-key (client IP) token-bucket rate limiter with idle
+// eviction and a bounded entry count.
+//
+// Each key gets its own limiter created on first use. Entries idle longer
+// than the TTL are dropped by a background sweep goroutine; when the entry
+// map reaches its maximum size, stale entries are evicted and, if none are
+// stale, the least-recently-seen entry is dropped, so spoofed sources cannot
+// grow the map without limit.
 type RateLimiter struct {
 	mu      sync.Mutex
 	entries map[string]*rlEntry
@@ -25,6 +33,11 @@ type RateLimiter struct {
 	stop    chan struct{}
 }
 
+// NewRateLimiter returns a RateLimiter admitting ratePerSec requests per
+// second per key with the given burst, and starts a background goroutine
+// that sweeps every idleTTL, dropping entries idle longer than idleTTL.
+// A ratePerSec of 0 or less disables limiting: Allow always returns true.
+// Call Close to stop the sweep goroutine.
 func NewRateLimiter(ratePerSec float64, burst int, idleTTL time.Duration) *RateLimiter {
 	rl := &RateLimiter{
 		entries: make(map[string]*rlEntry),
@@ -37,6 +50,9 @@ func NewRateLimiter(ratePerSec float64, burst int, idleTTL time.Duration) *RateL
 	return rl
 }
 
+// Allow reports whether a request from ip may proceed, recording the access
+// time for eviction purposes. It always returns true when limiting is
+// disabled.
 func (rl *RateLimiter) Allow(ip string) bool {
 	if rl.rate <= 0 {
 		return true
@@ -98,6 +114,8 @@ func (rl *RateLimiter) sweep() {
 	}
 }
 
+// Close stops the background eviction goroutine. The limiter must not be
+// used after Close.
 func (rl *RateLimiter) Close() {
 	close(rl.stop)
 }

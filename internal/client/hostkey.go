@@ -13,13 +13,29 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
+// HostKeyOptions configures host key verification.
 type HostKeyOptions struct {
+	// KnownHostsPath is the known_hosts file checked before connecting.
 	KnownHostsPath string
-	AcceptNew      bool
-	In             io.Reader
-	Out            io.Writer
+	// AcceptNew enables trust-on-first-use: unknown hosts are appended to
+	// the known_hosts file without prompting.
+	AcceptNew bool
+	// In is the prompt input stream; nil means os.Stdin.
+	In io.Reader
+	// Out is the prompt output stream; nil means os.Stderr.
+	Out io.Writer
 }
 
+// HostKeyCallback returns an ssh.HostKeyCallback implementing four
+// verification paths against KnownHostsPath:
+//
+//   - known host, matching key: accepted;
+//   - known host, changed key: hard failure (possible MITM); never accepted;
+//   - unknown host with AcceptNew: key appended to the known_hosts file and
+//     accepted;
+//   - unknown host without AcceptNew: prints an OpenSSH-style fingerprint
+//     prompt to Out, reads the answer from In, and appends the key only on
+//     "yes" (EOF or any other answer aborts the connection).
 func HostKeyCallback(opts HostKeyOptions) ssh.HostKeyCallback {
 	var base ssh.HostKeyCallback
 	var baseErr error
@@ -76,6 +92,11 @@ func HostKeyCallback(opts HostKeyOptions) ssh.HostKeyCallback {
 	}
 }
 
+// tcpAddr is a trivial net.Addr wrapping a bare "host:port" string. The
+// knownhosts callback calls net.SplitHostPort on remote.String() and fails
+// when it does not parse, so the callback fabricates this address from the
+// hostname it already holds rather than relying on the WebSocket-backed
+// connection's address.
 type tcpAddr string
 
 func (a tcpAddr) Network() string { return "tcp" }

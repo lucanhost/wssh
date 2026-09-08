@@ -38,6 +38,11 @@ import (
 
 const connectTimeout = 10 * time.Second
 
+// Connect dials the target's WebSocket URL, performs the SSH handshake with
+// the given signers and host key callback, and returns the established
+// client. Both the WebSocket dial and the SSH handshake are bounded by a
+// 10-second timeout. On SSH handshake failure the underlying connection is
+// closed before returning the error.
 func Connect(ctx context.Context, t *Target, signers []ssh.Signer, hostKeyCb ssh.HostKeyCallback) (*ssh.Client, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
@@ -59,7 +64,9 @@ func Connect(ctx context.Context, t *Target, signers []ssh.Signer, hostKeyCb ssh
 	return ssh.NewClient(conn, chans, reqs), nil
 }
 
+// ExitError reports the remote command's exit status.
 type ExitError struct {
+	// Code is the exit status reported by the remote SSH server.
 	Code int
 }
 
@@ -67,6 +74,9 @@ func (e *ExitError) Error() string {
 	return fmt.Sprintf("exit status %d", e.Code)
 }
 
+// ExitCode maps a session error to a process exit code: 0 for nil, the
+// remote exit status for an *ExitError (directly or wrapped), and 255 for
+// any other failure.
 func ExitCode(err error) int {
 	if err == nil {
 		return 0
@@ -89,6 +99,9 @@ func mapWaitError(err error) error {
 	return err
 }
 
+// RunCommand runs command on the remote host in exec mode — no PTY, no raw
+// terminal — writing output to stdout and stderr, and returns an *ExitError
+// carrying the remote exit status.
 func RunCommand(c *ssh.Client, command string, stdout, stderr io.Writer) error {
 	sess, err := c.NewSession()
 	if err != nil {
@@ -100,6 +113,11 @@ func RunCommand(c *ssh.Client, command string, stdout, stderr io.Writer) error {
 	return mapWaitError(sess.Run(command))
 }
 
+// RunShell starts an interactive remote shell: it puts the local terminal
+// into raw mode, requests a PTY sized to the current window, forwards
+// stdin/stdout/stderr, and resizes the remote PTY on SIGWINCH. SIGINT and
+// SIGTERM restore the terminal, close the session, and exit the process
+// with code 130. Stdin must be a terminal, or an error is returned.
 func RunShell(c *ssh.Client) error {
 	sess, err := c.NewSession()
 	if err != nil {

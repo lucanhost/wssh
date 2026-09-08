@@ -42,18 +42,38 @@ import (
 	"wssh/internal/transport"
 )
 
+// Config configures a Server. Zero values for optional fields are replaced
+// with defaults by New.
 type Config struct {
-	Signer             ssh.Signer
-	Logger             *slog.Logger
-	Rate               float64
-	Burst              int
+	// Signer is the SSH host key signer; required.
+	Signer ssh.Signer
+	// Logger receives connection and session logs; nil discards all output.
+	Logger *slog.Logger
+	// Rate is the permitted WebSocket upgrade rate per client IP, in
+	// requests per second; 0 disables rate limiting.
+	Rate float64
+	// Burst is the token-bucket burst size above Rate; 0 means 5.
+	Burst int
+	// AuthorizedKeysPath, when non-nil, overrides the location of a user's
+	// authorized_keys file; the default is $HOME/.ssh/authorized_keys.
 	AuthorizedKeysPath func(*user.User) string
+	// MaxSessionsPerConn caps session channels per SSH connection; 0 means 10.
 	MaxSessionsPerConn int
-	MaxChildren        int
-	MaxHandshakes      int
-	TrustedProxies     []string
+	// MaxChildren caps concurrently running child processes; 0 means 256.
+	MaxChildren int
+	// MaxHandshakes caps concurrent in-flight SSH handshakes; excess
+	// upgrades receive HTTP 503; 0 means 64.
+	MaxHandshakes int
+	// TrustedProxies lists CIDRs (or bare IPs) whose forwarding headers are
+	// trusted when extracting the real client IP; invalid entries are logged
+	// and ignored. Empty means the client IP is always taken from RemoteAddr.
+	TrustedProxies []string
 }
 
+// Server is an SSH-over-WebSocket daemon. It upgrades HTTP requests to
+// WebSocket connections, runs the SSH server handshake over them, and serves
+// session channels (shell/exec), dropping privileges to the authenticated
+// user when running as root.
 type Server struct {
 	sshConfig          ssh.ServerConfig
 	logger             *slog.Logger
@@ -68,6 +88,12 @@ type Server struct {
 	handshakeSem       chan struct{}
 }
 
+// New creates a Server from cfg, applying defaults for omitted fields:
+// Burst 5, MaxSessionsPerConn 10, MaxChildren 256, MaxHandshakes 64, and a
+// logger that discards output. Root mode is enabled when the process runs
+// with euid 0. TrustedProxies entries may be CIDRs or bare IPs (bare IPv4
+// becomes /32, bare IPv6 becomes /128). A rate limiter is created only when
+// cfg.Rate is greater than 0.
 func New(cfg Config) *Server {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -137,8 +163,16 @@ func currentUserFromOS() string {
 // LoginGraceTime. It is a variable so tests can shorten it.
 var handshakeTimeout = 60 * time.Second
 
+// Root reports whether the server runs in root mode (euid 0), where it
+// authenticates any OS user and drops privileges to the authenticated user
+// before spawning processes.
 func (s *Server) Root() bool { return s.root }
 
+// WebSocketHandler returns an http.Handler that upgrades WebSocket requests
+// and serves SSH over them. It rate-limits upgrades per client IP (HTTP 429
+// when exceeded; the IP honors TrustedProxies), admits at most
+// MaxHandshakes concurrent SSH handshakes (HTTP 503 beyond that), and serves
+// each accepted connection in its own goroutine.
 func (s *Server) WebSocketHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := s.clientIP(r)
@@ -209,10 +243,14 @@ func (s *Server) serveConn(netConn net.Conn, remoteAddr string) {
 	}
 }
 
+// Wait blocks until every connection accepted by the server has finished.
 func (s *Server) Wait() {
 	s.wg.Wait()
 }
 
+// WaitTimeout blocks until every connection has finished or the timeout
+// expires, whichever comes first. A timeout of 0 or less waits indefinitely.
+// It reports whether the drain completed.
 func (s *Server) WaitTimeout(timeout time.Duration) bool {
 	done := make(chan struct{})
 	go func() {
@@ -232,6 +270,8 @@ func (s *Server) WaitTimeout(timeout time.Duration) bool {
 	}
 }
 
+// Close releases server resources, stopping the rate limiter's background
+// eviction goroutine if one was created.
 func (s *Server) Close() {
 	if s.limiter != nil {
 		s.limiter.Close()

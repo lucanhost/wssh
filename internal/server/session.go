@@ -264,6 +264,9 @@ func (s *Server) startProcess(u *user.User, shell string, term string, havePTY b
 	return cmd, nil, pw, nil
 }
 
+// ErrMalformedCredential is returned when the authenticated user's uid or
+// gid cannot be parsed as unsigned 32-bit integers. The session fails
+// closed — it is never started under the daemon's own credentials.
 var ErrMalformedCredential = errors.New("malformed uid or gid in user record")
 
 func credentialsFor(u *user.User) (*syscall.Credential, error) {
