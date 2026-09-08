@@ -34,6 +34,9 @@ import (
 	"github.com/lucanhost/wssh/internal/client"
 )
 
+// version is stamped at build time via -ldflags="-X main.version=..."
+var version = "dev"
+
 type multiFlag []string
 
 func (m *multiFlag) String() string { return strings.Join(*m, ",") }
@@ -52,11 +55,16 @@ func main() {
 	flag.Var(&keys, "i", "private key path (repeatable)")
 	knownHosts := flag.String("known-hosts", filepath.Join(home, ".ssh", "known_hosts"), "known hosts file")
 	acceptNew := flag.Bool("accept-new-host-key", false, "automatically accept unknown host keys (TOFU)")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "usage: wssh [flags] [ws://|wss://]user@host[:port][/path] [command...]\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	if *showVersion {
+		fmt.Printf("wssh %s\n", version)
+		os.Exit(0)
+	}
 
 	args := flag.Args()
 	if len(args) < 1 {

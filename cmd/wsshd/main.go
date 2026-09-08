@@ -31,6 +31,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -44,6 +45,9 @@ import (
 	"github.com/lucanhost/wssh/internal/server"
 )
 
+// version is stamped at build time via -ldflags="-X main.version=..."
+var version = "dev"
+
 func main() {
 	var (
 		addr           = flag.String("addr", ":8080", "HTTP listen address")
@@ -54,8 +58,13 @@ func main() {
 		rate           = flag.Float64("rate", 1, "upgrade requests per second per IP (burst 5); 0 disables")
 		trustedProxies = flag.String("trusted-proxies", "", "comma-separated CIDRs/bare IPs trusted to send forwarding headers (X-Forwarded-For, X-Real-IP, CF-Connecting-IP)")
 		configPath     = flag.String("config", "", "TOML config file path")
+		showVersion    = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
+	if *showVersion {
+		fmt.Printf("wsshd %s\n", version)
+		os.Exit(0)
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	var fileOverlay *config.Overlay
