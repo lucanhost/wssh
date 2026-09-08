@@ -22,7 +22,7 @@ jobs:
       - name: Build binaries
         run: |
           VERSION=${GITHUB_REF_NAME}
-          LDFLAGS="-s -w"
+          LDFLAGS="-s -w -X main.version=${VERSION}"
           PLATFORMS=(
             "linux/amd64"
             "linux/arm64"
