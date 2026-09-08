@@ -15,6 +15,17 @@ SSH-over-WebSocket daemon and client in pure Go.
 - Public-key authentication only; password and keyboard-interactive auth are
   deliberately unsupported.
 - WebSocket message read limit is 1 MiB per frame; larger SSH packets cause the connection to close.
+- `trusted_proxies` precedence: an empty or absent `-trusted-proxies` flag never
+  clears a list set in the TOML config file. The config overlay only applies
+  values that are actually set, and an empty flag value parses to no list at
+  all, so the file's list survives. To clear the list, remove the
+  `trusted_proxies` key from the TOML file (or set it to `trusted_proxies = []`).
+  A non-empty `-trusted-proxies CIDR1,CIDR2` overrides the file as usual.
+- WebSocket origin policy: `wsshd` keeps the `coder/websocket` default, which
+  rejects upgrades whose `Origin` header does not match the host (no
+  `OriginPatterns` are configured). Do not add permissive origin patterns to
+  the accept path — allowing all origins would re-introduce cross-site
+  WebSocket hijacking.
 
 ## Configuration (wsshd)
 
