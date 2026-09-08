@@ -31,7 +31,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"wssh/internal/client"
+	"github.com/lucanhost/wssh/internal/client"
 )
 
 type multiFlag []string

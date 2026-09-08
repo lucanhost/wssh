@@ -1,4 +1,4 @@
-module wssh
+module github.com/lucanhost/wssh
 
 go 1.26.8
 

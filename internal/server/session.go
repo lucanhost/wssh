@@ -14,7 +14,7 @@ import (
 	"github.com/creack/pty"
 	"golang.org/x/crypto/ssh"
 
-	"wssh/internal/termval"
+	"github.com/lucanhost/wssh/internal/termval"
 )
 
 type ptyRequest struct {

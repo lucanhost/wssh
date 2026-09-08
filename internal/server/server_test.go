@@ -18,7 +18,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"wssh/internal/transport"
+	"github.com/lucanhost/wssh/internal/transport"
 )
 
 func newTestServer(t *testing.T, authorizedKeys string, rate float64) (*Server, string) {

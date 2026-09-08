@@ -40,8 +40,8 @@ import (
 	"syscall"
 	"time"
 
-	"wssh/internal/config"
-	"wssh/internal/server"
+	"github.com/lucanhost/wssh/internal/config"
+	"github.com/lucanhost/wssh/internal/server"
 )
 
 func main() {

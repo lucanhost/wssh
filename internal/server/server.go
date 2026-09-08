@@ -39,7 +39,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"wssh/internal/transport"
+	"github.com/lucanhost/wssh/internal/transport"
 )
 
 // Config configures a Server. Zero values for optional fields are replaced

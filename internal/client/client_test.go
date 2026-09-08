@@ -19,7 +19,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"wssh/internal/server"
+	"github.com/lucanhost/wssh/internal/server"
 )
 
 func startLoopbackServer(t *testing.T) (string, ssh.Signer) {

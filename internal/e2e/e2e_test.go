@@ -21,8 +21,8 @@ import (
 	"github.com/coder/websocket"
 	"golang.org/x/crypto/ssh"
 
-	"wssh/internal/client"
-	"wssh/internal/server"
+	"github.com/lucanhost/wssh/internal/client"
+	"github.com/lucanhost/wssh/internal/server"
 )
 
 func startServer(t *testing.T, rate float64, burst int) (target *client.Target, clientSigner ssh.Signer) {
