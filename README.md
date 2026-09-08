@@ -45,6 +45,10 @@ Download pre-built binaries from the
 ## Quick Start
 
 ```bash
+# Check versions
+./bin/wsshd -version
+./bin/wssh -version
+
 # Start the server (plain ws://, auto-generates host key)
 ./bin/wsshd -addr :8080 -hostkey /etc/wssh/host_key
 
@@ -110,6 +114,7 @@ rate    = 1.0                    # upgrade requests/sec per IP (burst 5); 0 disa
 | `-rate` | `1` | Upgrade requests/sec/IP (burst 5); `0` disables |
 | `-trusted-proxies` | (none) | Comma-separated CIDRs trusted for forwarding headers |
 | `-config` | (none) | TOML config file path |
+| `-version` | `false` | Print version and exit |
 
 ### wssh flags
 
@@ -118,6 +123,7 @@ rate    = 1.0                    # upgrade requests/sec per IP (burst 5); 0 disa
 | `-i` | `~/.ssh/id_ed25519`, `~/.ssh/id_rsa` | Private key path (repeatable) |
 | `--known-hosts` | `~/.ssh/known_hosts` | Known hosts file |
 | `--accept-new-host-key` | `false` | Trust-on-first-use for unknown hosts |
+| `-version` | `false` | Print version and exit |
 
 ## Security
 
