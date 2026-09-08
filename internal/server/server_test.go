@@ -406,7 +406,9 @@ func (c *recordingConn) SetDeadline(t time.Time) error {
 	return c.Conn.SetDeadline(t)
 }
 
-func TestServeConnHandshakeDeadline(t *testing.T) {
+	// Rewrites the package-level handshakeTimeout (restored via t.Cleanup); must
+	// not run under t.Parallel, which would race other tests' handshakes.
+	func TestServeConnHandshakeDeadline(t *testing.T) {
 	s := newAuthServer(t, "")
 	old := handshakeTimeout
 	handshakeTimeout = 50 * time.Millisecond

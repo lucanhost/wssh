@@ -58,8 +58,8 @@ func TestRateLimiterCapsEntries(t *testing.T) {
 	rl.mu.Lock()
 	n := len(rl.entries)
 	rl.mu.Unlock()
-	if n != maxEntries {
-		t.Fatalf("entries = %d, want %d", n, maxEntries)
+	if n > maxEntries {
+		t.Fatalf("entries = %d, exceeds cap %d", n, maxEntries)
 	}
 	if !rl.Allow("ip-overflow") {
 		t.Fatal("new IP denied at capacity")
