@@ -42,6 +42,17 @@ func lookupShell(username string) string {
 			}
 		}
 	}
+
+	// 3. Fallback for Windows
+	if runtime.GOOS == "windows" {
+		// Try COMSPEC environment variable (typically cmd.exe)
+		if shell := os.Getenv("COMSPEC"); shell != "" {
+			return shell
+		}
+		// Default to standard Windows command prompt
+		return "C:\\Windows\\System32\\cmd.exe"
+	}
+
 	return ""
 }
 

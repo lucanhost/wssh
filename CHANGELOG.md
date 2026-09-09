@@ -5,6 +5,8 @@ auto-generated release notes from commit history.
 
 ## [Unreleased]
 
+- Fix Windows `lookupShell`: fall back to `%COMSPEC%` / `cmd.exe` so the
+  auth `shell` extension is never empty
 - Fix cross-platform CI: macOS shell lookup via `dscl` fallback, Windows
   SID bypass for authorized_keys checks, `DOMAIN\user` stripping in
   client/E2E targets, Unix-permission test skips and mode-check guard on
