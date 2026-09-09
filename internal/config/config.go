@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 
 	"github.com/BurntSushi/toml"
 )
@@ -57,12 +59,19 @@ type Config struct {
 }
 
 // Defaults returns the built-in configuration: addr ":8080", path "/ws",
-// host key "/etc/wssh/host_key", rate 1, TLS disabled, no trusted proxies.
+// host key "/etc/wssh/host_key" on Unix or %AppData%\wssh\host_key on
+// Windows, rate 1, TLS disabled, no trusted proxies.
 func Defaults() Config {
+	hostKey := "/etc/wssh/host_key"
+	if runtime.GOOS == "windows" {
+		if cfgDir, err := os.UserConfigDir(); err == nil {
+			hostKey = filepath.Join(cfgDir, "wssh", "host_key")
+		}
+	}
 	return Config{
 		Addr:    ":8080",
 		Path:    "/ws",
-		HostKey: "/etc/wssh/host_key",
+		HostKey: hostKey,
 		Rate:    1,
 	}
 }

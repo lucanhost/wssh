@@ -37,6 +37,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -67,10 +69,16 @@ func (ln tcpKeepAliveListener) Accept() (net.Conn, error) {
 }
 
 func main() {
+	defaultHostKey := "/etc/wssh/host_key"
+	if runtime.GOOS == "windows" {
+		if cfgDir, err := os.UserConfigDir(); err == nil {
+			defaultHostKey = filepath.Join(cfgDir, "wssh", "host_key")
+		}
+	}
 	var (
 		addr           = flag.String("addr", ":8080", "HTTP listen address")
 		path           = flag.String("path", "/ws", "WebSocket endpoint path")
-		hostKey        = flag.String("hostkey", "/etc/wssh/host_key", "SSH host key path (ed25519/RSA; auto-generated when missing)")
+		hostKey        = flag.String("hostkey", defaultHostKey, "SSH host key path (ed25519/RSA; auto-generated when missing)")
 		cert           = flag.String("cert", "", "TLS certificate file (enables HTTPS/WSS)")
 		key            = flag.String("key", "", "TLS private key file")
 		rate           = flag.Float64("rate", 1, "upgrade requests per second per IP (burst 5); 0 disables")

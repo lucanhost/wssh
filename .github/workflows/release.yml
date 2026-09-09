@@ -18,6 +18,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
 
       - name: Build binaries
         run: |
@@ -28,13 +29,22 @@ jobs:
             "linux/arm64"
             "darwin/amd64"
             "darwin/arm64"
+            "windows/amd64"
+            "windows/arm64"
           )
           mkdir -p dist
           for platform in "${PLATFORMS[@]}"; do
             GOOS="${platform%/*}"
             GOARCH="${platform#*/}"
             for bin in wsshd wssh; do
-              output="dist/${bin}-${VERSION}-${GOOS}-${GOARCH}"
+              # Append .exe extension for Windows builds
+              ext=""
+              if [ "$GOOS" = "windows" ]; then
+                ext=".exe"
+              fi
+              
+              output="dist/${bin}-${VERSION}-${GOOS}-${GOARCH}${ext}"
+              echo "Building ${output}..."
               GOOS="${GOOS}" GOARCH="${GOARCH}" CGO_ENABLED=0 go build -trimpath \
                 -buildvcs=true -ldflags="${LDFLAGS}" -o "${output}" "./cmd/${bin}"
             done

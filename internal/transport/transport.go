@@ -29,8 +29,9 @@ import (
 )
 
 const (
-	keepaliveInterval = 15 * time.Second
-	keepaliveTimeout  = 5 * time.Second
+	keepaliveInterval = 30 * time.Second
+	keepaliveTimeout  = 15 * time.Second
+	maxPingFailures   = 3
 )
 
 // Accept upgrades the HTTP request to a WebSocket connection and returns it
@@ -108,6 +109,7 @@ func (c *connWithDone) Close() error {
 func keepalive(ctx context.Context, c *websocket.Conn, done <-chan struct{}) {
 	ticker := time.NewTicker(keepaliveInterval)
 	defer ticker.Stop()
+	failures := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -119,11 +121,16 @@ func keepalive(ctx context.Context, c *websocket.Conn, done <-chan struct{}) {
 			err := c.Ping(pingCtx)
 			cancel()
 			if err != nil {
-				// Close the connection immediately on ping timeout so
-				// the SSH layer gets an EOF instead of hanging indefinitely.
-				c.Close(websocket.StatusInternalError, "ping timeout")
-				return
+				failures++
+				if failures >= maxPingFailures {
+					// Close the connection only after consecutive ping
+					// failures so brief network blips don't drop sessions.
+					c.Close(websocket.StatusInternalError, "ping timeout")
+					return
+				}
+				continue
 			}
+			failures = 0
 		}
 	}
 }

@@ -26,7 +26,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"syscall"
+	"runtime"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -118,6 +118,9 @@ func mapWaitError(err error) error {
 	}
 	var exitErr *ssh.ExitError
 	if errors.As(err, &exitErr) {
+		if exitErr.Signal() != "" {
+			return &ExitError{Code: 128}
+		}
 		return &ExitError{Code: exitErr.ExitStatus()}
 	}
 	return err
@@ -160,7 +163,11 @@ func RunShell(c *ssh.Client) error {
 	defer restore()
 
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)
+	if runtime.GOOS == "windows" {
+		signal.Notify(sigCh, os.Interrupt)
+	} else {
+		notifySignals(sigCh)
+	}
 	done := make(chan struct{})
 	defer close(done)
 	defer signal.Stop(sigCh)
@@ -170,13 +177,12 @@ func RunShell(c *ssh.Client) error {
 			case <-done:
 				return
 			case sig := <-sigCh:
-				switch sig {
-				case syscall.SIGWINCH:
+				if isWinch(sig) {
 					w, h, err := term.GetSize(fd)
 					if err == nil {
 						_ = sess.WindowChange(h, w)
 					}
-				default:
+				} else {
 					restore()
 					_ = sess.Close()
 					os.Exit(130)
@@ -188,6 +194,25 @@ func RunShell(c *ssh.Client) error {
 	w, h, err := term.GetSize(fd)
 	if err != nil {
 		w, h = 80, 24
+	}
+	if runtime.GOOS == "windows" {
+		go func() {
+			t := time.NewTicker(500 * time.Millisecond)
+			defer t.Stop()
+			lastW, lastH := w, h
+			for {
+				select {
+				case <-done:
+					return
+				case <-t.C:
+					newW, newH, err := term.GetSize(fd)
+					if err == nil && (newW != lastW || newH != lastH) {
+						lastW, lastH = newW, newH
+						_ = sess.WindowChange(newH, newW)
+					}
+				}
+			}
+		}()
 	}
 	termEnv := os.Getenv("TERM")
 	if !termval.Valid(termEnv) {

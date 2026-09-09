@@ -7,11 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"strconv"
+	"runtime"
+	"strings"
 	"sync"
-	"syscall"
 
-	"github.com/creack/pty"
+	pty "github.com/aymanbagabas/go-pty"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/lucanhost/wssh/internal/termval"
@@ -48,34 +48,6 @@ type exitSignalRequest struct {
 	LanguageTag  string
 }
 
-var signalNames = map[syscall.Signal]string{
-	syscall.SIGHUP:    "HUP",
-	syscall.SIGINT:    "INT",
-	syscall.SIGQUIT:   "QUIT",
-	syscall.SIGILL:    "ILL",
-	syscall.SIGABRT:   "ABRT",
-	syscall.SIGFPE:    "FPE",
-	syscall.SIGKILL:   "KILL",
-	syscall.SIGSEGV:   "SEGV",
-	syscall.SIGPIPE:   "PIPE",
-	syscall.SIGALRM:   "ALRM",
-	syscall.SIGTERM:   "TERM",
-	syscall.SIGCHLD:   "CHLD",
-	syscall.SIGCONT:   "CONT",
-	syscall.SIGSTOP:   "STOP",
-	syscall.SIGTSTP:   "TSTP",
-	syscall.SIGTTIN:   "TTIN",
-	syscall.SIGTTOU:   "TTOU",
-	syscall.SIGURG:    "URG",
-	syscall.SIGXCPU:   "XCPU",
-	syscall.SIGXFSZ:   "XFSZ",
-	syscall.SIGVTALRM: "VTALRM",
-	syscall.SIGPROF:   "PROF",
-	syscall.SIGWINCH:  "WINCH",
-	syscall.SIGIO:     "IO",
-	syscall.SIGSYS:    "SYS",
-}
-
 func clampWinsize(rows, cols uint32) (uint16, uint16, bool) {
 	if rows == 0 || cols == 0 {
 		if rows == 0 {
@@ -95,24 +67,59 @@ func clampWinsize(rows, cols uint32) (uint16, uint16, bool) {
 	return uint16(rows), uint16(cols), true
 }
 
+func resolveShellAndArgs(shell string, cmd string) (string, []string) {
+	if shell == "" {
+		if runtime.GOOS == "windows" {
+			if _, err := exec.LookPath("pwsh.exe"); err == nil {
+				shell = "pwsh.exe"
+			} else if _, err := exec.LookPath("powershell.exe"); err == nil {
+				shell = "powershell.exe"
+			} else {
+				shell = "cmd.exe"
+			}
+		} else {
+			shell = "/bin/sh"
+		}
+	}
+	if cmd == "" {
+		return shell, nil
+	}
+	lower := strings.ToLower(shell)
+	if strings.Contains(lower, "cmd.exe") || strings.HasSuffix(lower, "cmd") {
+		return shell, []string{"/C", cmd}
+	}
+	if strings.Contains(lower, "powershell") || strings.Contains(lower, "pwsh") {
+		return shell, []string{"-Command", cmd}
+	}
+	return shell, []string{"-c", cmd}
+}
+
 func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request, u *user.User, shell string) {
 	var (
-		cmd       *exec.Cmd
-		ptyFile   *os.File
+		cmd       any
+		pt        pty.Pty
 		stdinPipe *os.File
 		term      string
 		havePTY   bool
-		winSize   pty.Winsize
+		cols      uint16 = 80
+		rows      uint16 = 24
 		mu        sync.Mutex
 		semHeld   bool
 	)
 	defer func() {
-		if cmd != nil && cmd.Process != nil {
-			_ = cmd.Process.Kill()
+		switch c := cmd.(type) {
+		case *pty.Cmd:
+			if c != nil && c.Process != nil {
+				_ = c.Process.Kill()
+			}
+		case *exec.Cmd:
+			if c != nil && c.Process != nil {
+				_ = c.Process.Kill()
+			}
 		}
 		mu.Lock()
-		if ptyFile != nil {
-			_ = ptyFile.Close()
+		if pt != nil {
+			_ = pt.Close()
 		}
 		mu.Unlock()
 		if stdinPipe != nil {
@@ -138,10 +145,10 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 				req.Reply(false, nil)
 				continue
 			}
-			winSize = pty.Winsize{Rows: r, Cols: c}
+			rows, cols = r, c
 			mu.Lock()
-			if ptyFile != nil {
-				_ = pty.Setsize(ptyFile, &winSize)
+			if pt != nil {
+				_ = pt.Resize(int(cols), int(rows))
 			}
 			mu.Unlock()
 			req.Reply(true, nil)
@@ -157,10 +164,10 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 				req.Reply(false, nil)
 				continue
 			}
-			winSize = pty.Winsize{Rows: r, Cols: c}
+			rows, cols = r, c
 			mu.Lock()
-			if ptyFile != nil {
-				_ = pty.Setsize(ptyFile, &winSize)
+			if pt != nil {
+				_ = pt.Resize(int(cols), int(rows))
 			}
 			mu.Unlock()
 			req.Reply(true, nil)
@@ -171,14 +178,14 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 				continue
 			}
 			kind := req.Type
-			var shellArgs []string
+			var execCmd string
 			if req.Type == "exec" {
 				var p execRequest
 				if err := ssh.Unmarshal(req.Payload, &p); err != nil {
 					req.Reply(false, nil)
 					continue
 				}
-				shellArgs = []string{"-c", p.Command}
+				execCmd = p.Command
 			}
 			if s.childrenSem != nil {
 				select {
@@ -195,8 +202,9 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 					<-s.childrenSem
 				}
 			}
+			shellPath, shellArgs := resolveShellAndArgs(shell, execCmd)
 			var err error
-			cmd, ptyFile, stdinPipe, err = s.startProcess(u, shell, term, havePTY, winSize, shellArgs, channel)
+			cmd, pt, stdinPipe, err = s.startProcess(u, shellPath, term, havePTY, cols, rows, shellArgs, channel)
 			if err != nil {
 				s.logger.Error("process start failed", "user", u.Username, "type", kind, "err", err)
 				cmd = nil
@@ -206,7 +214,7 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 			}
 			req.Reply(true, nil)
 			s.logger.Info("session opened", "user", u.Username, "type", kind, "pty", havePTY)
-			go s.reap(channel, cmd, ptyFile, stdinPipe, &mu, u, release)
+			go s.reap(channel, cmd, pt, stdinPipe, &mu, u, release)
 
 		default:
 			req.Reply(false, nil)
@@ -214,7 +222,34 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 	}
 }
 
-func (s *Server) startProcess(u *user.User, shell string, term string, havePTY bool, winSize pty.Winsize, shellArgs []string, channel ssh.Channel) (*exec.Cmd, *os.File, *os.File, error) {
+func (s *Server) startProcess(u *user.User, shell string, term string, havePTY bool, cols, rows uint16, shellArgs []string, channel ssh.Channel) (any, pty.Pty, *os.File, error) {
+	if havePTY {
+		pt, err := pty.New()
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		cmd := pt.Command(shell, shellArgs...)
+		cmd.Dir = u.HomeDir
+		cmd.Env = []string{
+			"HOME=" + u.HomeDir,
+			"USER=" + u.Username,
+			"SHELL=" + shell,
+			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		}
+		if term != "" {
+			cmd.Env = append(cmd.Env, "TERM="+term)
+		}
+		if err := setupProcAttrs(cmd, u); err != nil {
+			_ = pt.Close()
+			return nil, nil, nil, err
+		}
+		_ = pt.Resize(int(cols), int(rows))
+		if err := cmd.Start(); err != nil {
+			_ = pt.Close()
+			return nil, nil, nil, err
+		}
+		return cmd, pt, nil, nil
+	}
 	if shell == "" {
 		shell = "/bin/sh"
 	}
@@ -226,25 +261,13 @@ func (s *Server) startProcess(u *user.User, shell string, term string, havePTY b
 		"SHELL=" + shell,
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 	}
-	if havePTY && term != "" {
+	if term != "" {
+		// Non-PTY sessions have no terminal; still propagate TERM when set
+		// for consistency with PTY sessions.
 		cmd.Env = append(cmd.Env, "TERM="+term)
 	}
-	attrs := &syscall.SysProcAttr{}
-	cred, err := credentialsFor(u)
-	if err != nil {
+	if err := setupExecProcAttrs(cmd, u); err != nil {
 		return nil, nil, nil, err
-	}
-	if cred != nil {
-		attrs.Credential = cred
-	}
-	if havePTY {
-		attrs.Setsid = true
-		attrs.Setctty = true
-		f, err := pty.StartWithAttrs(cmd, &winSize, attrs)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		return cmd, f, nil, nil
 	}
 	pr, pw, err := os.Pipe()
 	if err != nil {
@@ -268,84 +291,60 @@ func (s *Server) startProcess(u *user.User, shell string, term string, havePTY b
 // closed — it is never started under the daemon's own credentials.
 var ErrMalformedCredential = errors.New("malformed uid or gid in user record")
 
-func credentialsFor(u *user.User) (*syscall.Credential, error) {
-	if os.Geteuid() != 0 {
-		return nil, nil
-	}
-	uid, err := strconv.ParseUint(u.Uid, 10, 32)
-	if err != nil {
-		return nil, ErrMalformedCredential
-	}
-	gid, err := strconv.ParseUint(u.Gid, 10, 32)
-	if err != nil {
-		return nil, ErrMalformedCredential
-	}
-	groups := []uint32{}
-	if gidStrings, err := u.GroupIds(); err == nil {
-		for _, gs := range gidStrings {
-			g, err := strconv.ParseUint(gs, 10, 32)
-			if err != nil {
-				continue
-			}
-			groups = append(groups, uint32(g))
-		}
-	}
-	return &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: groups}, nil
-}
-
-func (s *Server) reap(channel ssh.Channel, cmd *exec.Cmd, ptyFile *os.File, stdinPipe *os.File, mu *sync.Mutex, u *user.User, release func()) {
+func (s *Server) reap(channel ssh.Channel, cmd any, pt pty.Pty, stdinPipe *os.File, mu *sync.Mutex, u *user.User, release func()) {
 	defer release()
 	var copyWG sync.WaitGroup
-	if ptyFile != nil {
+	if pt != nil {
 		copyWG.Add(1)
 		go func() {
 			defer copyWG.Done()
-			io.Copy(channel, ptyFile)
+			io.Copy(channel, pt)
 		}()
-		go io.Copy(ptyFile, channel)
+		go io.Copy(pt, channel)
 	}
-	err := cmd.Wait()
-	if ptyFile != nil {
+	var err error
+	switch c := cmd.(type) {
+	case *pty.Cmd:
+		err = c.Wait()
+	case *exec.Cmd:
+		err = c.Wait()
+	default:
+		err = fmt.Errorf("unknown command type %T", cmd)
+	}
+	if pt != nil {
 		if mu != nil {
 			mu.Lock()
-			_ = ptyFile.Close()
+			_ = pt.Close()
 			mu.Unlock()
 		} else {
-			_ = ptyFile.Close()
+			_ = pt.Close()
 		}
 	}
 	if stdinPipe != nil {
 		_ = stdinPipe.Close()
 	}
 	copyWG.Wait()
-	status := uint32(0)
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if waitStatus, ok := exitErr.Sys().(syscall.WaitStatus); ok && waitStatus.Signaled() {
-				name, ok := signalNames[waitStatus.Signal()]
-				if !ok {
-					name = fmt.Sprintf("%d", int(waitStatus.Signal()))
-				}
-				channel.SendRequest("exit-signal", false, ssh.Marshal(exitSignalRequest{
-					SignalName:  name,
-					CoreDumped:  waitStatus.CoreDump(),
-					LanguageTag: "en",
-				}))
-				_ = channel.Close()
-				s.logger.Info("session closed", "user", u.Username, "signal", name)
-				return
-			}
-			if code := exitErr.ExitCode(); code >= 0 {
-				status = uint32(code)
-			} else {
-				status = 255
-			}
-		} else {
-			status = 255
+	info := parseExitStatus(err)
+	if err != nil && info.signaled {
+		channel.SendRequest("exit-signal", false, ssh.Marshal(exitSignalRequest{
+			SignalName:  info.signalName,
+			CoreDumped:  info.coreDumped,
+			LanguageTag: "en",
+		}))
+		_ = channel.Close()
+		s.logger.Info("session closed", "user", u.Username, "signal", info.signalName)
+		return
+	}
+	if err != nil && !info.signaled {
+		// Log non-zero exits at appropriate level: parseExitStatus
+		// normalizes unknown failures to status 1.
+		if _, ok := err.(*exec.ExitError); !ok {
+			// Check for pty.Cmd-wrapped exit errors via string matching
+			// is unnecessary; just log unexpected wait errors.
 			s.logger.Error("child wait error", "err", err)
 		}
 	}
-	channel.SendRequest("exit-status", false, ssh.Marshal(exitStatusRequest{Status: status}))
+	channel.SendRequest("exit-status", false, ssh.Marshal(exitStatusRequest{Status: info.status}))
 	_ = channel.Close()
-	s.logger.Info("session closed", "user", u.Username, "status", status)
+	s.logger.Info("session closed", "user", u.Username, "status", info.status)
 }
