@@ -212,6 +212,28 @@ func (s *Server) serveConn(netConn net.Conn, remoteAddr string) {
 	_ = netConn.SetDeadline(time.Time{}) // handshake done; allow long-lived sessions
 	defer sconn.Close()
 	go ssh.DiscardRequests(reqs)
+
+	// Server-side SSH keepalive
+	keepaliveDone := make(chan struct{})
+	go func() {
+		sconn.Wait()
+		close(keepaliveDone)
+	}()
+	go func() {
+		t := time.NewTicker(10 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-keepaliveDone:
+				return
+			case <-t.C:
+				_, _, err := sconn.SendRequest("keepalive@openssh.com", true, nil)
+				if err != nil {
+					return
+				}
+			}
+		}
+	}()
 	s.logger.Info("connection authenticated", "user", sconn.User(), "remote", remoteAddr)
 
 	var sessionCount int

@@ -61,7 +61,31 @@ func Connect(ctx context.Context, t *Target, signers []ssh.Signer, hostKeyCb ssh
 		netConn.Close()
 		return nil, fmt.Errorf("ssh connect: %w", err)
 	}
-	return ssh.NewClient(conn, chans, reqs), nil
+	client := ssh.NewClient(conn, chans, reqs)
+
+	// Start SSH keepalive to prevent idle connection drops by proxies/firewalls
+	keepaliveDone := make(chan struct{})
+	go func() {
+		client.Wait() // Blocks until connection is shut down
+		close(keepaliveDone)
+	}()
+	go func() {
+		t := time.NewTicker(10 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-keepaliveDone:
+				return
+			case <-t.C:
+				_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
+				if err != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	return client, nil
 }
 
 // ExitError reports the remote command's exit status.

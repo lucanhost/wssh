@@ -48,6 +48,24 @@ import (
 // version is stamped at build time via -ldflags="-X main.version=..."
 var version = "dev"
 
+// tcpKeepAliveListener wraps a TCP listener to enable TCP keepalive and
+// disable Nagle's algorithm on accepted connections; without TCP_NODELAY
+// every interactive SSH keystroke can incur a ~40ms Nagle buffering delay.
+type tcpKeepAliveListener struct {
+	*net.TCPListener
+}
+
+func (ln tcpKeepAliveListener) Accept() (net.Conn, error) {
+	tc, err := ln.AcceptTCP()
+	if err != nil {
+		return nil, err
+	}
+	tc.SetKeepAlive(true)
+	tc.SetKeepAlivePeriod(3 * time.Minute)
+	tc.SetNoDelay(true)
+	return tc, nil
+}
+
 func main() {
 	var (
 		addr           = flag.String("addr", ":8080", "HTTP listen address")
@@ -136,6 +154,9 @@ func main() {
 	if err != nil {
 		logger.Error("listen", "err", err)
 		os.Exit(1)
+	}
+	if tcpLn, ok := ln.(*net.TCPListener); ok {
+		ln = tcpKeepAliveListener{tcpLn}
 	}
 	tlsMode := "plain"
 	if resolved.Cert != "" {

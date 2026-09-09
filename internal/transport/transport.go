@@ -59,8 +59,30 @@ func Accept(w http.ResponseWriter, r *http.Request) (net.Conn, error) {
 // closing the returned conn stops the keepalive. WebSocket compression is
 // disabled.
 func Dial(ctx context.Context, rawURL string) (net.Conn, error) {
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	// Explicitly set TCP_NODELAY on the outbound connection
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				c, err := dialer.DialContext(ctx, network, addr)
+				if err != nil {
+					return nil, err
+				}
+				if tc, ok := c.(*net.TCPConn); ok {
+					tc.SetNoDelay(true)
+					tc.SetKeepAlive(true)
+				}
+				return c, nil
+			},
+		},
+	}
+
 	c, _, err := websocket.Dial(ctx, rawURL, &websocket.DialOptions{
 		CompressionMode: websocket.CompressionDisabled,
+		HTTPClient:      httpClient,
 	})
 	if err != nil {
 		return nil, err
@@ -94,11 +116,14 @@ func keepalive(ctx context.Context, c *websocket.Conn, done <-chan struct{}) {
 			return
 		case <-ticker.C:
 			pingCtx, cancel := context.WithTimeout(ctx, keepaliveTimeout)
-			if err := c.Ping(pingCtx); err != nil {
-				cancel()
+			err := c.Ping(pingCtx)
+			cancel()
+			if err != nil {
+				// Close the connection immediately on ping timeout so
+				// the SSH layer gets an EOF instead of hanging indefinitely.
+				c.Close(websocket.StatusInternalError, "ping timeout")
 				return
 			}
-			cancel()
 		}
 	}
 }
