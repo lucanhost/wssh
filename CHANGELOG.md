@@ -5,6 +5,11 @@ auto-generated release notes from commit history.
 
 ## [Unreleased]
 
+- Fix cross-platform CI: macOS shell lookup via `dscl` fallback, Windows
+  SID bypass for authorized_keys checks, `DOMAIN\user` stripping in
+  client/E2E targets, Unix-permission test skips and mode-check guard on
+  Windows, flake-proof rate-limiter eviction assertion
+
 ## [0.2.0] - 2026-09-10
 
 - Native Windows support: `wsshd` runs with ConPTY via

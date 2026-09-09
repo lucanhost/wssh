@@ -3,6 +3,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -22,8 +23,10 @@ func TestLoadOrGenerateHostKeyGenerates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generated file missing: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("mode = %o, want 600", info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("mode = %o, want 600", info.Mode().Perm())
+		}
 	}
 	raw, _ := os.ReadFile(path)
 	if !strings.Contains(string(raw), "OPENSSH PRIVATE KEY") {

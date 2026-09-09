@@ -65,7 +65,11 @@ func startServer(t *testing.T, rate float64, burst int) (target *client.Target, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err = client.ParseTarget("ws://" + u.Username + "@" + strings.TrimPrefix(up.URL, "http://") + "/ws")
+	username := u.Username
+	if idx := strings.LastIndex(username, "\\"); idx != -1 {
+		username = username[idx+1:]
+	}
+	target, err = client.ParseTarget("ws://" + username + "@" + strings.TrimPrefix(up.URL, "http://") + "/ws")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +217,11 @@ func startTLSServer(t *testing.T, rate float64, burst int) (*client.Target, ssh.
 	roots := x509.NewCertPool()
 	roots.AddCert(up.Certificate())
 
-	target, err := client.ParseTarget("wss://" + u.Username + "@" + strings.TrimPrefix(up.URL, "https://") + "/ws")
+	username := u.Username
+	if idx := strings.LastIndex(username, "\\"); idx != -1 {
+		username = username[idx+1:]
+	}
+	target, err := client.ParseTarget("wss://" + username + "@" + strings.TrimPrefix(up.URL, "https://") + "/ws")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -51,7 +51,11 @@ func loopbackClient(t *testing.T) *ssh.Client {
 	t.Helper()
 	upURL, signer := startLoopbackServer(t)
 	u, _ := user.Current()
-	tgt, err := ParseTarget("ws://" + u.Username + "@" + strings.TrimPrefix(upURL, "http://") + "/ws")
+	username := u.Username
+	if idx := strings.LastIndex(username, "\\"); idx != -1 {
+		username = username[idx+1:]
+	}
+	tgt, err := ParseTarget("ws://" + username + "@" + strings.TrimPrefix(upURL, "http://") + "/ws")
 	if err != nil {
 		t.Fatal(err)
 	}

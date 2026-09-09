@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -17,17 +19,27 @@ import (
 var errAccessDenied = errors.New("access denied")
 
 func lookupShell(username string) string {
+	// 1. Try /etc/passwd first (Linux and most Unix systems)
 	f, err := os.Open("/etc/passwd")
-	if err != nil {
-		return ""
+	if err == nil {
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := scanner.Text()
+			fields := strings.Split(line, ":")
+			if len(fields) >= 7 && fields[0] == username {
+				return strings.TrimSpace(fields[6])
+			}
+		}
 	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fields := strings.Split(line, ":")
-		if len(fields) >= 7 && fields[0] == username {
-			return fields[6]
+	// 2. Fallback for macOS, which uses OpenDirectory
+	if runtime.GOOS == "darwin" {
+		cmd := exec.Command("dscl", ".", "-read", "/Users/"+username, "UserShell")
+		if out, err := cmd.Output(); err == nil {
+			parts := strings.SplitN(string(out), ":", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1])
+			}
 		}
 	}
 	return ""
@@ -97,6 +109,10 @@ func (s *Server) loadAuthorizedKeys(u *user.User) ([]ssh.PublicKey, error) {
 func openVerifiedAuthorizedKeys(path string, u *user.User) (*os.File, error) {
 	if u.HomeDir == "" {
 		return nil, errors.New("user has no home directory")
+	}
+	// Windows uses SIDs for Uid, not numeric strings. Skip Unix-style checks.
+	if runtime.GOOS == "windows" {
+		return os.Open(path)
 	}
 	uid64, err := strconv.ParseUint(u.Uid, 10, 32)
 	if err != nil {

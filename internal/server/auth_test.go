@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -171,6 +172,9 @@ func fuzzKeyLine() (ssh.Signer, string) {
 }
 
 func TestOpenVerifiedAuthorizedKeys(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce Unix-style file permissions")
+	}
 	me, err := user.Current()
 	if err != nil {
 		t.Skipf("user.Current: %v", err)
@@ -224,6 +228,9 @@ func TestOpenVerifiedAuthorizedKeys(t *testing.T) {
 }
 
 func TestOpenVerifiedAuthorizedKeysCleanFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce Unix-style file permissions")
+	}
 	me, err := user.Current()
 	if err != nil {
 		t.Skipf("user.Current: %v", err)
@@ -260,6 +267,9 @@ func TestOpenVerifiedAuthorizedKeysCleanFile(t *testing.T) {
 }
 
 func TestOpenVerifiedAuthorizedKeysGroupWritableHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce Unix-style file permissions")
+	}
 	me, err := user.Current()
 	if err != nil {
 		t.Skipf("user.Current: %v", err)
@@ -284,6 +294,9 @@ func TestOpenVerifiedAuthorizedKeysGroupWritableHome(t *testing.T) {
 }
 
 func TestOpenVerifiedAuthorizedKeysUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce Unix-style file permissions")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root opens files regardless of mode")
 	}
@@ -326,6 +339,9 @@ func TestOpenVerifiedAuthorizedKeysMissing(t *testing.T) {
 }
 
 func TestOpenVerifiedAuthorizedKeysBadUser(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce Unix-style file permissions")
+	}
 	home := t.TempDir()
 	sshDir := filepath.Join(home, ".ssh")
 	if err := os.Mkdir(sshDir, 0o700); err != nil {
