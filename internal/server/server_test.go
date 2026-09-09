@@ -90,8 +90,8 @@ func TestExecLoopback(t *testing.T) {
 	if err := sess.Run("echo exec-ok"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if got := out.String(); got != "exec-ok\n" {
-		t.Fatalf("output = %q, want %q", got, "exec-ok\n")
+	if got := strings.TrimSpace(out.String()); got != "exec-ok" {
+		t.Fatalf("output = %q, want %q", got, "exec-ok")
 	}
 }
 
@@ -267,8 +267,8 @@ func TestMaxChildrenSemReleased(t *testing.T) {
 	if err := s4.Run("echo after-release"); err != nil {
 		t.Fatalf("run after release: %v", err)
 	}
-	if out.String() != "after-release\n" {
-		t.Fatalf("output = %q, want %q", out.String(), "after-release\n")
+	if strings.TrimSpace(out.String()) != "after-release" {
+		t.Fatalf("output = %q, want %q", strings.TrimSpace(out.String()), "after-release")
 	}
 	cl1.Close()
 	cl2.Close()
@@ -331,8 +331,8 @@ func TestMaxChildrenSemNotLeakedOnMalformedExec(t *testing.T) {
 	if err := s4.Run("echo ok"); err != nil {
 		t.Fatalf("valid exec failed: %v", err)
 	}
-	if out.String() != "ok\n" {
-		t.Fatalf("output = %q, want %q", out.String(), "ok\n")
+	if strings.TrimSpace(out.String()) != "ok" {
+		t.Fatalf("output = %q, want %q", strings.TrimSpace(out.String()), "ok")
 	}
 
 	s2.Close()
@@ -606,8 +606,8 @@ func TestMaxHandshakesSemRejectsAtCapacity(t *testing.T) {
 	if err := sess.Run("echo recovered"); err != nil {
 		t.Fatalf("run after recovery: %v", err)
 	}
-	if out.String() != "recovered\n" {
-		t.Fatalf("output = %q, want %q", out.String(), "recovered\n")
+	if strings.TrimSpace(out.String()) != "recovered" {
+		t.Fatalf("output = %q, want %q", strings.TrimSpace(out.String()), "recovered")
 	}
 }
 
@@ -634,8 +634,8 @@ func TestMaxHandshakesSemReleasedAfterHandshake(t *testing.T) {
 	if err := sess2.Run("echo while-alive"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if out.String() != "while-alive\n" {
-		t.Fatalf("output = %q, want %q", out.String(), "while-alive\n")
+	if strings.TrimSpace(out.String()) != "while-alive" {
+		t.Fatalf("output = %q, want %q", strings.TrimSpace(out.String()), "while-alive")
 	}
 
 	sess1.Close()

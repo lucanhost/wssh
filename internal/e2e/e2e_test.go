@@ -87,7 +87,7 @@ func TestE2EExec(t *testing.T) {
 	if err := client.RunCommand(cl, "echo e2e-ok", &out, io.Discard); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if out.String() != "e2e-ok\n" {
+	if strings.TrimSpace(out.String()) != "e2e-ok" {
 		t.Fatalf("output = %q", out.String())
 	}
 }
@@ -264,7 +264,7 @@ func TestE2EExecOverTLS(t *testing.T) {
 	if err := client.RunCommand(cl, "echo e2e-tls-ok", &out, io.Discard); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if out.String() != "e2e-tls-ok\n" {
+	if strings.TrimSpace(out.String()) != "e2e-tls-ok" {
 		t.Fatalf("output = %q", out.String())
 	}
 }

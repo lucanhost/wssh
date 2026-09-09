@@ -5,6 +5,8 @@ auto-generated release notes from commit history.
 
 ## [Unreleased]
 
+- Normalize shell-output assertions with `strings.TrimSpace` so Windows
+  `\r\n` line endings pass CI
 - Fix Windows `lookupShell`: fall back to `%COMSPEC%` / `cmd.exe` so the
   auth `shell` extension is never empty
 - Fix cross-platform CI: macOS shell lookup via `dscl` fallback, Windows

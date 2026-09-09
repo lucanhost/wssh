@@ -74,7 +74,7 @@ func TestRunCommandOutputAndExitCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunCommand: %v", err)
 	}
-	if out.String() != "client-ok\n" {
+	if strings.TrimSpace(out.String()) != "client-ok" {
 		t.Fatalf("output = %q", out.String())
 	}
 	err = RunCommand(cl, "exit 9", &out, io.Discard)
@@ -107,7 +107,7 @@ func TestConnectSurvivesDialTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunCommand after sleep: %v", err)
 	}
-	if out.String() != "alive\n" {
+	if strings.TrimSpace(out.String()) != "alive" {
 		t.Fatalf("output = %q", out.String())
 	}
 }
