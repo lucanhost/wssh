@@ -155,7 +155,19 @@ func currentUserFromOS() string {
 	if err != nil {
 		return os.Getenv("USER")
 	}
-	return u.Username
+	return stripDomain(u.Username)
+}
+
+// stripDomain removes a leading DOMAIN\ prefix from a username. The wssh
+// client offers the domain-stripped name (see ParseTarget), so a non-root
+// wsshd must compare against the same stripped form; on Windows a service
+// account like DOMAIN\user would otherwise reject every connection that
+// arrives as user. It is a no-op on Unix, where usernames have no backslash.
+func stripDomain(name string) string {
+	if i := strings.LastIndex(name, "\\"); i != -1 {
+		return name[i+1:]
+	}
+	return name
 }
 
 // handshakeTimeout bounds the time allowed for the SSH handshake (version

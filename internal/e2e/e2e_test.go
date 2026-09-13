@@ -15,6 +15,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,6 +25,27 @@ import (
 	"github.com/lucanhost/wssh/internal/client"
 	"github.com/lucanhost/wssh/internal/server"
 )
+
+// logCapture is a concurrency-safe log sink for in-process test servers.
+// The slog handler writes from whichever serve goroutine handles a
+// handshake while a t.Cleanup may read the same buffer, so all access is
+// guarded by a mutex; a bare bytes.Buffer is not safe for that.
+type logCapture struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (c *logCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.Write(p)
+}
+
+func (c *logCapture) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.String()
+}
 
 func startServer(t *testing.T, rate float64, burst int) (target *client.Target, clientSigner ssh.Signer) {
 	t.Helper()
@@ -48,7 +70,7 @@ func startServer(t *testing.T, rate float64, burst int) (target *client.Target, 
 		t.Fatal(err)
 	}
 
-	var logBuf bytes.Buffer
+	var logBuf logCapture
 	srv := server.New(server.Config{
 		Signer:             hostSigner,
 		Logger:             slog.New(slog.NewTextHandler(&logBuf, nil)),
@@ -203,7 +225,7 @@ func startTLSServer(t *testing.T, rate float64, burst int) (*client.Target, ssh.
 		t.Fatal(err)
 	}
 
-	var logBuf bytes.Buffer
+	var logBuf logCapture
 	srv := server.New(server.Config{
 		Signer:             hostSigner,
 		Logger:             slog.New(slog.NewTextHandler(&logBuf, nil)),
