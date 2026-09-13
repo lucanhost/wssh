@@ -34,10 +34,16 @@ func startLoopbackServer(t *testing.T) (string, ssh.Signer) {
 	}
 	akPath := filepath.Join(t.TempDir(), "authorized_keys")
 	os.WriteFile(akPath, ssh.MarshalAuthorizedKey(signer.PublicKey()), 0o600)
+	var logBuf bytes.Buffer
 	srv := server.New(server.Config{
 		Signer:             signer,
-		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:             slog.New(slog.NewTextHandler(&logBuf, nil)),
 		AuthorizedKeysPath: func(*user.User) string { return akPath },
+	})
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("server log:\n%s", logBuf.String())
+		}
 	})
 	t.Cleanup(srv.Close)
 	mux := http.NewServeMux()

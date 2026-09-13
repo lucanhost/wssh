@@ -48,12 +48,18 @@ func startServer(t *testing.T, rate float64, burst int) (target *client.Target, 
 		t.Fatal(err)
 	}
 
+	var logBuf bytes.Buffer
 	srv := server.New(server.Config{
 		Signer:             hostSigner,
-		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:             slog.New(slog.NewTextHandler(&logBuf, nil)),
 		Rate:               rate,
 		Burst:              burst,
 		AuthorizedKeysPath: func(*user.User) string { return akPath },
+	})
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("server log:\n%s", logBuf.String())
+		}
 	})
 	t.Cleanup(srv.Close)
 	mux := http.NewServeMux()
@@ -197,12 +203,18 @@ func startTLSServer(t *testing.T, rate float64, burst int) (*client.Target, ssh.
 		t.Fatal(err)
 	}
 
+	var logBuf bytes.Buffer
 	srv := server.New(server.Config{
 		Signer:             hostSigner,
-		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:             slog.New(slog.NewTextHandler(&logBuf, nil)),
 		Rate:               rate,
 		Burst:              burst,
 		AuthorizedKeysPath: func(*user.User) string { return akPath },
+	})
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("server log:\n%s", logBuf.String())
+		}
 	})
 	t.Cleanup(srv.Close)
 	mux := http.NewServeMux()
