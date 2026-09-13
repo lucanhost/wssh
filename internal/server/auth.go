@@ -58,7 +58,10 @@ func lookupShell(username string) string {
 
 func (s *Server) publicKeyCallback(meta ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
 	username := meta.User()
-	if !s.root && username != s.currentUsername {
+	// A Windows OS user is DOMAIN\user but the wssh client offers the
+	// domain-stripped local part; compare on the local part so both forms
+	// accept, while still rejecting any other user.
+	if !s.root && stripDomain(username) != stripDomain(s.currentUsername) {
 		s.logger.Warn("auth rejected: user not permitted", "user", username, "remote", meta.RemoteAddr())
 		return nil, errAccessDenied
 	}
