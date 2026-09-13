@@ -5,6 +5,8 @@ auto-generated release notes from commit history.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-13
+
 - `wsshd` daemonizes by default: re-executes itself detached (`Setsid`,
   stdio → `/dev/null`, working directory preserved) and prints the child
   PID; new `-D` flag opts out to run in the foreground (use `-D` under
@@ -63,7 +65,8 @@ Initial release.
   `-ldflags -X main.version`
 - Release artifacts for linux/darwin on amd64/arm64
 
-[Unreleased]: https://github.com/lucanhost/wssh/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/lucanhost/wssh/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/lucanhost/wssh/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/lucanhost/wssh/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/lucanhost/wssh/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/lucanhost/wssh/releases/tag/v0.1.0
