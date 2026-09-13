@@ -49,8 +49,11 @@ Download pre-built binaries from the
 ./bin/wsshd -version
 ./bin/wssh -version
 
-# Start the server (plain ws://, auto-generates host key)
+# Start the server (runs in the background by default)
 ./bin/wsshd -addr :8080 -hostkey /etc/wssh/host_key
+
+# Start in the foreground (useful for debugging or running via systemd)
+./bin/wsshd -D -addr :8080 -hostkey /etc/wssh/host_key
 
 # Start with TLS
 ./bin/wsshd -addr :443 -cert cert.pem -key key.pem
@@ -113,6 +116,7 @@ rate    = 1.0                    # upgrade requests/sec per IP (burst 5); 0 disa
 | `-key` | (none) | TLS private key file |
 | `-rate` | `1` | Upgrade requests/sec/IP (burst 5); `0` disables |
 | `-trusted-proxies` | (none) | Comma-separated CIDRs trusted for forwarding headers |
+| `-D` | `false` | Run in foreground (do not daemonize) |
 | `-config` | (none) | TOML config file path |
 | `-version` | `false` | Print version and exit |
 
@@ -124,6 +128,16 @@ rate    = 1.0                    # upgrade requests/sec per IP (burst 5); 0 disa
 | `--known-hosts` | `~/.ssh/known_hosts` | Known hosts file |
 | `--accept-new-host-key` | `false` | Trust-on-first-use for unknown hosts |
 | `-version` | `false` | Print version and exit |
+
+## Logging
+
+By default `wsshd` daemonizes: it re-executes itself in a detached background
+process with stdin, stdout, and stderr redirected to `/dev/null`, prints the
+child PID, and preserves the working directory (so relative `-config` and
+`-hostkey` paths still resolve). Because the daemon's standard output is
+redirected to `/dev/null`, log output is discarded — production deployments
+should use a process manager such as systemd with `-D` (foreground mode) to
+capture logs properly.
 
 ## Security
 

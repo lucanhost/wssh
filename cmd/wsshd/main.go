@@ -50,6 +50,54 @@ import (
 // version is stamped at build time via -ldflags="-X main.version=..."
 var version = "dev"
 
+// daemonEnv is set to "1" in the child process spawned by daemonize so the
+// child skips re-daemonizing.
+const daemonEnv = "_WSSHD_DAEMON"
+
+// daemonize re-executes the current binary as a detached background process
+// and exits the parent, unless the process is already the daemonized child
+// (daemonEnv set) or is on Windows, where session detachment is unsupported
+// and wsshd stays in the foreground.
+//
+// The child inherits the working directory (relative -config/-hostkey paths
+// keep resolving) and receives the parent's arguments plus -D, with stdin,
+// stdout, and stderr redirected to /dev/null.
+func daemonize() {
+	if os.Getenv(daemonEnv) == "1" {
+		return
+	}
+	if runtime.GOOS == "windows" {
+		fmt.Fprintln(os.Stderr, "wsshd: background daemonization is not supported on Windows; running in the foreground")
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wsshd: daemonize: resolve executable: %v\n", err)
+		os.Exit(1)
+	}
+	args := make([]string, 0, len(os.Args)+1)
+	args = append(args, os.Args...)
+	args = append(args, "-D")
+	devnull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wsshd: daemonize: open %s: %v\n", os.DevNull, err)
+		os.Exit(1)
+	}
+	env := append(os.Environ(), daemonEnv+"=1")
+	proc, err := os.StartProcess(exe, args, &os.ProcAttr{
+		Env:   env,
+		Files: []*os.File{devnull, devnull, devnull},
+		Sys:   sysProcAttr(),
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wsshd: daemonize: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wsshd daemonized with PID %d\n", proc.Pid)
+	_ = proc.Release()
+	os.Exit(0)
+}
+
 // tcpKeepAliveListener wraps a TCP listener to enable TCP keepalive and
 // disable Nagle's algorithm on accepted connections; without TCP_NODELAY
 // every interactive SSH keystroke can incur a ~40ms Nagle buffering delay.
@@ -83,6 +131,7 @@ func main() {
 		key            = flag.String("key", "", "TLS private key file")
 		rate           = flag.Float64("rate", 1, "upgrade requests per second per IP (burst 5); 0 disables")
 		trustedProxies = flag.String("trusted-proxies", "", "comma-separated CIDRs/bare IPs trusted to send forwarding headers (X-Forwarded-For, X-Real-IP, CF-Connecting-IP)")
+		foreground     = flag.Bool("D", false, "run in foreground (do not daemonize)")
 		configPath     = flag.String("config", "", "TOML config file path")
 		showVersion    = flag.Bool("version", false, "print version and exit")
 	)
@@ -90,6 +139,9 @@ func main() {
 	if *showVersion {
 		fmt.Printf("wsshd %s\n", version)
 		os.Exit(0)
+	}
+	if !*foreground {
+		daemonize()
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 

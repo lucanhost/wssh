@@ -66,18 +66,22 @@ func TestRateLimiterCapsEntries(t *testing.T) {
 	}
 	rl.mu.Lock()
 	n = len(rl.entries)
-	evictedCount := 0
-	for i := 0; i < 100; i++ {
+	missing := 0
+	for i := 0; i < maxEntries; i++ {
 		if _, ok := rl.entries[fmt.Sprintf("ip-%d", i)]; !ok {
-			evictedCount++
+			missing++
 		}
 	}
 	rl.mu.Unlock()
 	if n > maxEntries {
 		t.Fatalf("map grew past cap: %d entries", n)
 	}
-	if evictedCount == 0 {
-		t.Fatal("expected some early entries to be evicted at capacity")
+	// At capacity a new entry forces exactly one eviction of a pre-existing
+	// entry. The evicted entry is whichever original ties for the oldest
+	// lastSeen, and that tie resolution is nondeterministic, so require at
+	// least one original to be gone rather than a specific index range.
+	if missing == 0 {
+		t.Fatal("expected eviction to drop at least one entry at capacity")
 	}
 	if !rl.Allow("ip-1") {
 		t.Fatal("recently-seen entry denied after eviction")
