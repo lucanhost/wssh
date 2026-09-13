@@ -5,6 +5,11 @@ auto-generated release notes from commit history.
 
 ## [Unreleased]
 
+- `wsshd` daemonizes by default: re-executes itself detached (`Setsid`,
+  stdio → `/dev/null`, working directory preserved) and prints the child
+  PID; new `-D` flag opts out to run in the foreground (use `-D` under
+  systemd or when debugging). Windows does not support daemonization and
+  always runs in the foreground
 - Normalize shell-output assertions with `strings.TrimSpace` so Windows
   `\r\n` line endings pass CI
 - Fix Windows `lookupShell`: fall back to `%COMSPEC%` / `cmd.exe` so the
