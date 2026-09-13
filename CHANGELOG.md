@@ -5,6 +5,11 @@ auto-generated release notes from commit history.
 
 ## [Unreleased]
 
+- `wsshd`: fix Windows public-key auth rejecting every connection when the
+  service account is a `DOMAIN\user` name — the non-root user check now
+  compares on the local part, matching the domain-stripped username the
+  `wssh` client offers
+
 ## [0.3.0] - 2026-09-13
 
 - `wsshd` daemonizes by default: re-executes itself detached (`Setsid`,
