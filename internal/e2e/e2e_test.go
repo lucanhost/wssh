@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -170,7 +171,14 @@ func TestE2EPTYShell(t *testing.T) {
 	if err := sess.Shell(); err != nil {
 		t.Fatal(err)
 	}
-	io.WriteString(stdin, "echo e2e-pty\nexit\n")
+	// A Windows shell (cmd.exe) executes input lines on CR, not the Unix
+	// LF the test otherwise writes; without this the "exit" line never runs
+	// and the PTY session (and sess.Wait) hangs.
+	sep := "\n"
+	if runtime.GOOS == "windows" {
+		sep = "\r"
+	}
+	io.WriteString(stdin, "echo e2e-pty"+sep+"exit"+sep)
 	if err := sess.Wait(); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
