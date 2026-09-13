@@ -3,6 +3,7 @@
 package server
 
 import (
+	"os"
 	"os/exec"
 	"os/user"
 	"syscall"
@@ -29,4 +30,24 @@ func setupExecProcAttrs(cmd *exec.Cmd, u *user.User) error {
 // still compile; Windows never drops privileges.
 func credentialsFor(u *user.User) (any, error) {
 	return nil, nil
+}
+
+// baseEnv returns the environment a child process runs under on Windows.
+// Unlike the Unix baseEnv, the PATH cannot be a hardcoded /usr list: none of
+// those directories exist on Windows, and a missing SystemRoot can make
+// cmd.exe itself misbehave. Forward the host's real values instead (none are
+// sensitive); u.HomeDir maps to USERPROFILE and the resolved shell to ComSpec.
+func baseEnv(u *user.User, shell string) []string {
+	sysRoot := os.Getenv("SystemRoot")
+	return []string{
+		"USERPROFILE=" + u.HomeDir,
+		"USERNAME=" + u.Username,
+		"ComSpec=" + shell,
+		"SystemRoot=" + sysRoot,
+		"windir=" + sysRoot,
+		"PATH=" + sysRoot + `\system32;` + sysRoot + `;` + sysRoot + `\System32\Wbem`,
+		"PATHEXT=.COM;.EXE;.BAT;.CMD;.VBS;.JS;.WS",
+		"TEMP=" + os.Getenv("TEMP"),
+		"TMP=" + os.Getenv("TMP"),
+	}
 }

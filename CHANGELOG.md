@@ -9,6 +9,10 @@ auto-generated release notes from commit history.
   service account is a `DOMAIN\user` name — the non-root user check now
   compares on the local part, matching the domain-stripped username the
   `wssh` client offers
+- `wsshd`: spawn Windows shell/exec children with a usable host
+  environment (`SystemRoot`, `ComSpec`, a Windows `PATH`, `PATHEXT`,
+  `TEMP`) instead of the hardcoded Unix `PATH`, so external commands
+  resolve and `cmd.exe` initializes correctly
 
 ## [0.3.0] - 2026-09-13
 

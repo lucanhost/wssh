@@ -255,12 +255,7 @@ func (s *Server) startProcess(u *user.User, shell string, term string, havePTY b
 	}
 	cmd := exec.Command(shell, shellArgs...)
 	cmd.Dir = u.HomeDir
-	cmd.Env = []string{
-		"HOME=" + u.HomeDir,
-		"USER=" + u.Username,
-		"SHELL=" + shell,
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-	}
+	cmd.Env = baseEnv(u, shell)
 	if term != "" {
 		// Non-PTY sessions have no terminal; still propagate TERM when set
 		// for consistency with PTY sessions.

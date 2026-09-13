@@ -71,3 +71,15 @@ func credentialsFor(u *user.User) (*syscall.Credential, error) {
 	}
 	return &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: groups}, nil
 }
+
+// baseEnv returns the sanitized environment a child process runs under on
+// Unix: only HOME, USER, SHELL, and a fixed PATH, so sessions inherit no
+// ambient variables from the daemon.
+func baseEnv(u *user.User, shell string) []string {
+	return []string{
+		"HOME=" + u.HomeDir,
+		"USER=" + u.Username,
+		"SHELL=" + shell,
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+	}
+}
