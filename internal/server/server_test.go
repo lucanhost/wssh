@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -215,6 +217,16 @@ func TestMaxSessionsPerConnRejectsOverflow(t *testing.T) {
 	cl3.Close()
 }
 
+// holdCmd returns a command that stays alive for roughly n seconds, so a
+// semaphore test can occupy a child slot. "sleep" is not a Windows command,
+// so on Windows it pings localhost n+1 times (~n seconds) instead.
+func holdCmd(n int) string {
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf("ping -n %d 127.0.0.1", n+1)
+	}
+	return fmt.Sprintf("sleep %d", n)
+}
+
 func TestMaxChildrenSemReleased(t *testing.T) {
 	signer, line := testSigner(t)
 	akPath := filepath.Join(t.TempDir(), "authorized_keys")
@@ -239,9 +251,9 @@ func TestMaxChildrenSemReleased(t *testing.T) {
 	cl3 := dialTestSSH(t, wsURL, currentUser(t), signer)
 
 	s1, _ := cl1.NewSession()
-	s1.Start("sleep 60")
+	s1.Start(holdCmd(60))
 	s2, _ := cl2.NewSession()
-	s2.Start("sleep 60")
+	s2.Start(holdCmd(60))
 
 	s3, err := cl3.NewSession()
 	if err != nil {
