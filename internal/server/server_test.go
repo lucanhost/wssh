@@ -219,10 +219,12 @@ func TestMaxSessionsPerConnRejectsOverflow(t *testing.T) {
 
 // holdCmd returns a command that stays alive for roughly n seconds, so a
 // semaphore test can occupy a child slot. "sleep" is not a Windows command,
-// so on Windows it pings localhost n+1 times (~n seconds) instead.
+// so on Windows it pings localhost n+1 times (~n seconds) instead. The ping
+// binary is fully qualified because the test child runs under a Unix-style
+// PATH and cmd.exe cannot otherwise locate ping.exe to resolve it.
 func holdCmd(n int) string {
 	if runtime.GOOS == "windows" {
-		return fmt.Sprintf("ping -n %d 127.0.0.1", n+1)
+		return fmt.Sprintf("C:\\Windows\\System32\\ping -n %d 127.0.0.1", n+1)
 	}
 	return fmt.Sprintf("sleep %d", n)
 }
