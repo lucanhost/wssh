@@ -206,6 +206,54 @@ func TestE2EPTYShell(t *testing.T) {
 	}
 }
 
+// TestE2EPTYOutputFlows is a draft that verifies a PTY session's output
+// actually reaches the client. It is skipped on Windows (same pattern as
+// TestE2EPTYShell): ConPTY output has not been observed reaching the client
+// on CI, so it cannot be asserted there yet. Un-skip it on a real Windows
+// machine to settle that open question, reading the Debug-level
+// pty->channel byte count in Server.reap to separate the go-pty/wiring side
+// from the channel/transport side. On Unix/macOS it runs as a normal
+// invariant (PTY output does flow there).
+func TestE2EPTYOutputFlows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("draft: un-skip on a real Windows machine to verify ConPTY output reaches the client")
+	}
+	target, signer := startServer(t, 0, 0)
+	cl, err := client.Connect(context.Background(), target, []ssh.Signer{signer}, ssh.InsecureIgnoreHostKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+	sess, err := cl.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.RequestPty("xterm", 24, 80, nil); err != nil {
+		t.Fatalf("pty: %v", err)
+	}
+	var out logCapture
+	sess.Stdout = &out
+	stdin, _ := sess.StdinPipe()
+	if err := sess.Shell(); err != nil {
+		t.Fatal(err)
+	}
+	io.WriteString(stdin, "echo e2e-pty-flows\n")
+
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		s := out.String()
+		if strings.Contains(s, "e2e-pty-flows") {
+			sess.Close()
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("PTY output did not reach the client within 8s: %q", s)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func TestE2ERateLimit(t *testing.T) {
 	target, signer := startServer(t, 1, 1)
 	cl, err := client.Connect(context.Background(), target, []ssh.Signer{signer}, ssh.InsecureIgnoreHostKey())
