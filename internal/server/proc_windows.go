@@ -14,11 +14,17 @@ import (
 )
 
 // setupProcAttrs configures SysProcAttr for a PTY-backed command on
-// Windows: new process group without a visible window. Credential
-// dropping is skipped on Windows.
+// Windows: a new process group so the child does not share the daemon's
+// Ctrl+C handling. CREATE_NO_WINDOW is deliberately NOT set: it is a
+// pre-ConPTY console mechanism (suppress the legacy conhost window a
+// console app would otherwise pop up), but a ConPTY-attached process is
+// headless by virtue of the pseudo-console, and Microsoft's own ConPTY
+// samples do not combine the two. Keeping the spawn path minimal here makes
+// it easier to isolate ConPTY output-flow behavior. Credential dropping is
+// skipped on Windows.
 func setupProcAttrs(cmd *pty.Cmd, u *user.User) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | 0x08000000,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
 	}
 	return nil
 }

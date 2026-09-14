@@ -20,6 +20,10 @@ auto-generated release notes from commit history.
   promptly instead of `cmd.Wait()` blocking on inherited stdio handles; the
   PTY session path now uses the same sanitized child environment as exec
   (previously it kept the hardcoded Unix `PATH`)
+- `wsshd` (Windows): stop setting `CREATE_NO_WINDOW` when spawning a
+  ConPTY-backed PTY child — it is a pre-ConPTY console flag that Microsoft's
+  ConPTY samples don't set (a pseudo-console child is already headless), so
+  the PTY spawn path now uses only `CREATE_NEW_PROCESS_GROUP`
 
 ## [0.3.0] - 2026-09-13
 
