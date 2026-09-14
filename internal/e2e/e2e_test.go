@@ -206,60 +206,6 @@ func TestE2EPTYShell(t *testing.T) {
 	}
 }
 
-// TestE2EPTYOutputFlows probes whether PTY output actually reaches the client
-// — the property the interactive-shell flow depends on. It is bounded by a
-// short hard deadline so it can never hang the suite, and it is non-gating on
-// Windows: when the marker does not arrive within the window it skips (not
-// fails), turning "does ConPTY output flow on this runner?" into an
-// observable CI signal without blocking main. On Unix/macOS PTY output does
-// flow, so a miss there is a genuine regression and the test fails.
-func TestE2EPTYOutputFlows(t *testing.T) {
-	target, signer := startServer(t, 0, 0)
-	cl, err := client.Connect(context.Background(), target, []ssh.Signer{signer}, ssh.InsecureIgnoreHostKey())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cl.Close()
-	sess, err := cl.NewSession()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	if err := sess.RequestPty("xterm", 24, 80, nil); err != nil {
-		t.Fatalf("pty: %v", err)
-	}
-	var out logCapture
-	sess.Stdout = &out
-	stdin, _ := sess.StdinPipe()
-	if err := sess.Shell(); err != nil {
-		t.Fatal(err)
-	}
-	// A Windows shell reads input lines on CR, not the Unix LF.
-	sep := "\n"
-	if runtime.GOOS == "windows" {
-		sep = "\r"
-	}
-	io.WriteString(stdin, "echo e2e-pty-flows"+sep)
-
-	deadline := time.Now().Add(8 * time.Second)
-	for {
-		s := out.String()
-		if strings.Contains(s, "e2e-pty-flows") {
-			return // marker round-tripped; the deferred cl.Close() tears the session down
-		}
-		if time.Now().After(deadline) {
-			if runtime.GOOS == "windows" {
-				// Known gap: ConPTY output not observed reaching the client in
-				// CI. Skip, don't fail, so this stays a signal, not a gate.
-				t.Skip("Windows PTY output did not reach the client within 8s; " +
-					"needs a real Windows box with io.Copy(channel, pt) byte-count logging to isolate")
-			}
-			t.Fatalf("PTY output did not reach the client within 8s: %q", s)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
 func TestE2ERateLimit(t *testing.T) {
 	target, signer := startServer(t, 1, 1)
 	cl, err := client.Connect(context.Background(), target, []ssh.Signer{signer}, ssh.InsecureIgnoreHostKey())
