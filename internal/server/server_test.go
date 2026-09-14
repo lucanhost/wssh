@@ -268,7 +268,6 @@ func TestMaxChildrenSemReleased(t *testing.T) {
 	s3.Close()
 
 	s1.Close()
-	time.Sleep(300 * time.Millisecond)
 
 	cl4 := dialTestSSH(t, wsURL, currentUser(t), signer)
 	s4, err := cl4.NewSession()
@@ -278,8 +277,19 @@ func TestMaxChildrenSemReleased(t *testing.T) {
 	defer s4.Close()
 	var out bytes.Buffer
 	s4.Stdout = &out
-	if err := s4.Run("echo after-release"); err != nil {
-		t.Fatalf("run after release: %v", err)
+	// s1's slot is released asynchronously, when the server reaps s1's
+	// child. A fixed sleep races on a loaded runner, so retry the exec
+	// until a slot is actually free rather than assume 300ms suffices.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		out.Reset()
+		if err := s4.Run("echo after-release"); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("slot not released after s1.Close() within 5s")
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	if strings.TrimSpace(out.String()) != "after-release" {
 		t.Fatalf("output = %q, want %q", strings.TrimSpace(out.String()), "after-release")
