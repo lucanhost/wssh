@@ -13,6 +13,13 @@ auto-generated release notes from commit history.
   environment (`SystemRoot`, `ComSpec`, a Windows `PATH`, `PATHEXT`,
   `TEMP`) instead of the hardcoded Unix `PATH`, so external commands
   resolve and `cmd.exe` initializes correctly
+- `wsshd` (Windows): reap the spawned process tree on session teardown via
+  a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` — closing the job
+  kills the whole tree (a `cmd.exe` and descendants such as a grandchild
+  `ping.exe`) in one call, so a closed session frees its `MaxChildren` slot
+  promptly instead of `cmd.Wait()` blocking on inherited stdio handles; the
+  PTY session path now uses the same sanitized child environment as exec
+  (previously it kept the hardcoded Unix `PATH`)
 
 ## [0.3.0] - 2026-09-13
 

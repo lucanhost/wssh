@@ -83,3 +83,18 @@ func baseEnv(u *user.User, shell string) []string {
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 	}
 }
+
+// jobObject is a no-op on Unix: the spawned child runs in its own session
+// (Setsid) and Process.Kill() already terminates the direct process, so the
+// shared session teardown has no extra tree handle to close. It exists so the
+// shared startProcess/defer path compiles identically on both platforms.
+type jobObject struct{}
+
+// newJobObject returns an inert job object; it always succeeds on Unix.
+func newJobObject() (*jobObject, error) { return &jobObject{}, nil }
+
+// assign is a no-op on Unix.
+func (*jobObject) assign(pid int) error { return nil }
+
+// close is a no-op on Unix.
+func (*jobObject) close() {}

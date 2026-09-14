@@ -230,14 +230,6 @@ func holdCmd(n int) string {
 }
 
 func TestMaxChildrenSemReleased(t *testing.T) {
-	// The "slot released after s1.Close()" assertion depends on the server
-	// reaping the closed session's child promptly. On Windows that
-	// child-kill/reap path has not been fast/reliable enough for CI (the
-	// slot was still held 5s after the close), so skip here. The MaxChildren
-	// cap logic is platform-independent and is fully exercised on Unix/macOS.
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows child reap is not reliably timed for this test in CI")
-	}
 	signer, line := testSigner(t)
 	akPath := filepath.Join(t.TempDir(), "authorized_keys")
 	akContent := line

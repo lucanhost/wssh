@@ -99,6 +99,7 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 		cmd       any
 		pt        pty.Pty
 		stdinPipe *os.File
+		job       *jobObject
 		term      string
 		havePTY   bool
 		cols      uint16 = 80
@@ -116,6 +117,12 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 			if c != nil && c.Process != nil {
 				_ = c.Process.Kill()
 			}
+		}
+		// Closing the job object reaps the whole process tree on Windows,
+		// where Process.Kill() alone leaves descendants alive and holding
+		// the pipes that keep cmd.Wait() blocked.
+		if job != nil {
+			job.close()
 		}
 		mu.Lock()
 		if pt != nil {
@@ -204,10 +211,11 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 			}
 			shellPath, shellArgs := resolveShellAndArgs(shell, execCmd)
 			var err error
-			cmd, pt, stdinPipe, err = s.startProcess(u, shellPath, term, havePTY, cols, rows, shellArgs, channel)
+			cmd, pt, stdinPipe, job, err = s.startProcess(u, shellPath, term, havePTY, cols, rows, shellArgs, channel)
 			if err != nil {
 				s.logger.Error("process start failed", "user", u.Username, "type", kind, "err", err)
 				cmd = nil
+				job = nil
 				release()
 				req.Reply(false, nil)
 				continue
@@ -222,33 +230,28 @@ func (s *Server) handleSession(channel ssh.Channel, requests <-chan *ssh.Request
 	}
 }
 
-func (s *Server) startProcess(u *user.User, shell string, term string, havePTY bool, cols, rows uint16, shellArgs []string, channel ssh.Channel) (any, pty.Pty, *os.File, error) {
+func (s *Server) startProcess(u *user.User, shell string, term string, havePTY bool, cols, rows uint16, shellArgs []string, channel ssh.Channel) (any, pty.Pty, *os.File, *jobObject, error) {
 	if havePTY {
 		pt, err := pty.New()
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		cmd := pt.Command(shell, shellArgs...)
 		cmd.Dir = u.HomeDir
-		cmd.Env = []string{
-			"HOME=" + u.HomeDir,
-			"USER=" + u.Username,
-			"SHELL=" + shell,
-			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		}
+		cmd.Env = baseEnv(u, shell)
 		if term != "" {
 			cmd.Env = append(cmd.Env, "TERM="+term)
 		}
 		if err := setupProcAttrs(cmd, u); err != nil {
 			_ = pt.Close()
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		_ = pt.Resize(int(cols), int(rows))
 		if err := cmd.Start(); err != nil {
 			_ = pt.Close()
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
-		return cmd, pt, nil, nil
+		return cmd, pt, nil, s.spawnJob(cmd.Process), nil
 	}
 	if shell == "" {
 		shell = "/bin/sh"
@@ -262,11 +265,11 @@ func (s *Server) startProcess(u *user.User, shell string, term string, havePTY b
 		cmd.Env = append(cmd.Env, "TERM="+term)
 	}
 	if err := setupExecProcAttrs(cmd, u); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	pr, pw, err := os.Pipe()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	cmd.Stdin = pr
 	cmd.Stdout = channel
@@ -274,11 +277,33 @@ func (s *Server) startProcess(u *user.User, shell string, term string, havePTY b
 	if err := cmd.Start(); err != nil {
 		pw.Close()
 		pr.Close()
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	pr.Close()
 	go io.Copy(pw, channel)
-	return cmd, nil, pw, nil
+	return cmd, nil, pw, s.spawnJob(cmd.Process), nil
+}
+
+// spawnJob creates a per-child job object and assigns the just-started process
+// to it so the session teardown can close it and reap the entire process tree.
+// On Unix the job is inert and Process.Kill() remains the effective mechanism.
+// It degrades to a nil job (Process.Kill() fallback) when job objects are
+// unavailable or the assignment fails, so the tree-kill optimization never
+// blocks session start.
+func (s *Server) spawnJob(proc *os.Process) *jobObject {
+	job, err := newJobObject()
+	if err != nil {
+		s.logger.Warn("job object unavailable; child descendants may outlive the session", "err", err)
+		return nil
+	}
+	if proc != nil {
+		if aerr := job.assign(proc.Pid); aerr != nil {
+			job.close()
+			s.logger.Warn("failed to assign child to job object; descendants may outlive the session", "err", aerr)
+			return nil
+		}
+	}
+	return job
 }
 
 // ErrMalformedCredential is returned when the authenticated user's uid or
