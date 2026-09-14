@@ -20,6 +20,12 @@ auto-generated release notes from commit history.
   promptly instead of `cmd.Wait()` blocking on inherited stdio handles; the
   PTY session path now uses the same sanitized child environment as exec
   (previously it kept the hardcoded Unix `PATH`)
+- `wsshd`: log the PTY byte counts in each direction (`pty->channel` and
+  `channel->pty`) at Debug level when a copy completes, so a ConPTY
+  session whose output is not reaching the client can be diagnosed without
+  adding instrumentation — a zero `pty->channel` count means nothing came
+  off the pseudo-console, a non-zero count that the client still did not
+  see points at the channel/transport side
 
 ## [0.3.0] - 2026-09-13
 

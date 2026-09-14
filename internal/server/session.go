@@ -318,9 +318,19 @@ func (s *Server) reap(channel ssh.Channel, cmd any, pt pty.Pty, stdinPipe *os.Fi
 		copyWG.Add(1)
 		go func() {
 			defer copyWG.Done()
-			io.Copy(channel, pt)
+			n, err := io.Copy(channel, pt)
+			// A pty->channel byte count of 0 means the ConPTY produced nothing
+			// for the client to receive (a go-pty/wiring problem); a non-zero
+			// count that the client still did not see points at the
+			// channel/transport side. Debug level so it is off by default but
+			// already present the next time Windows ConPTY output is
+			// investigated.
+			s.logger.Debug("pty->channel copy finished", "user", u.Username, "bytes", n, "err", err)
 		}()
-		go io.Copy(pt, channel)
+		go func() {
+			n, err := io.Copy(pt, channel)
+			s.logger.Debug("channel->pty copy finished", "user", u.Username, "bytes", n, "err", err)
+		}()
 	}
 	var err error
 	switch c := cmd.(type) {
